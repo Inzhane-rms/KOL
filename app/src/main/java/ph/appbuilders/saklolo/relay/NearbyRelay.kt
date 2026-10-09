@@ -15,69 +15,122 @@ import com.google.android.gms.nearby.connection.Payload
 import com.google.android.gms.nearby.connection.PayloadCallback
 import com.google.android.gms.nearby.connection.PayloadTransferUpdate
 import com.google.android.gms.nearby.connection.Strategy
+import ph.appbuilders.saklolo.audio.WavPcm
 import ph.appbuilders.saklolo.model.Alert
 import ph.appbuilders.saklolo.model.AlertJson
 import ph.appbuilders.saklolo.model.AlertStore
+import ph.appbuilders.saklolo.model.ClipLink
+import java.io.File
 
 /**
  * Phone-to-phone relay over Google Nearby Connections, strategy P2P_CLUSTER.
  * Works with Wi-Fi and Bluetooth radios on, including airplane mode with no
- * access point and no internet. Each phone rebroadcasts alerts it has not
- * seen, up to the hop limit.
+ * access point and no internet.
+ *
+ * Alert bytes and the original 16 kHz voice clip (a Nearby FILE payload) travel
+ * together. The clip is linked to the alert id. Endpoint sets are only touched
+ * through [RelayEndpoints], which is also what [send] locks on.
  */
 class NearbyRelay(
     context: Context,
     private val store: AlertStore,
+    private val clipsDir: File,
     private val onAlertsChanged: () -> Unit,
-    private val onStatus: (peers: Int, message: String) -> Unit,
+    private val onStatus: (peers: List<NearbyPeer>, message: String) -> Unit,
 ) {
     private val appContext = context.applicationContext
     private val client: ConnectionsClient = Nearby.getConnectionsClient(appContext)
-    private val connected = linkedSetOf<String>()
-    private val pending = linkedSetOf<String>()
-    private var running = false
-    private var localName = "Saklolo"
+    private val endpoints = RelayEndpoints()
+    private val clipLock = Any()
+    private val incomingPayloads = HashMap<Long, Payload>()
+    private val payloadToAlert = HashMap<Long, String>()
+    private val completedFiles = HashMap<Long, File>()
 
     fun start(name: String) {
-        if (running) return
-        localName = name
-        running = true
-        publishStatus("Looking for nearby Saklolo phones")
+        when (endpoints.beginSession(name)) {
+            RelayEndpoints.SessionStart.UNCHANGED -> publish("Relaying SOS alerts nearby")
+            RelayEndpoints.SessionStart.RENAME -> {
+                client.stopAdvertising()
+                beginAdvertising()
+            }
+            RelayEndpoints.SessionStart.FRESH -> {
+                beginAdvertising()
+                beginDiscovery()
+                publish("Looking for nearby B-LINK phones")
+            }
+        }
+    }
+
+    fun setFilter(filter: PeerFilter) {
+        endpoints.setFilter(filter)
+    }
+
+    fun peers(): List<NearbyPeer> = endpoints.snapshot()
+
+    fun broadcast(alert: Alert): Int = send(listOf(alert), exceptEndpoint = null)
+
+    private fun beginAdvertising() {
         val advertising = AdvertisingOptions.Builder().setStrategy(Strategy.P2P_CLUSTER).build()
-        client.startAdvertising(localName, SERVICE_ID, connectionCallback, advertising)
+        client.startAdvertising(endpoints.localName(), SERVICE_ID, connectionCallback, advertising)
             .addOnFailureListener { error ->
                 Log.w(TAG, "advertise failed", error)
-                publishStatus("Relay failed to advertise: ${error.message ?: "Play Services unavailable"}")
+                publish("Relay failed to advertise: ${error.message ?: "Play Services unavailable"}")
             }
+    }
+
+    private fun beginDiscovery() {
         val discovery = DiscoveryOptions.Builder().setStrategy(Strategy.P2P_CLUSTER).build()
         client.startDiscovery(SERVICE_ID, discoveryCallback, discovery)
             .addOnFailureListener { error ->
                 Log.w(TAG, "discovery failed", error)
-                publishStatus("Relay failed to discover: ${error.message ?: "check Bluetooth and Wi-Fi"}")
+                publish("Relay failed to discover: ${error.message ?: "check Bluetooth and Wi-Fi"}")
             }
     }
 
-    fun stop() {
-        running = false
-        client.stopAllEndpoints()
-        client.stopAdvertising()
-        client.stopDiscovery()
-        connected.clear()
-        pending.clear()
-        publishStatus("Relay off")
-    }
-
-    fun broadcast(alert: Alert) {
-        send(listOf(alert), exceptEndpoint = null)
-    }
-
-    private fun send(alerts: List<Alert>, exceptEndpoint: String?) {
-        val endpoints = synchronized(connected) { connected.filter { it != exceptEndpoint } }
-        if (endpoints.isEmpty()) return
-        val wire = alerts.mapNotNull { alert ->
-            RelayPolicy.outgoing(alert, store.isLocalOrigin(alert.id))
+    private fun send(alerts: List<Alert>, exceptEndpoint: String?): Int {
+        val targets = endpoints.snapshot(exceptEndpoint)
+        if (targets.isEmpty()) return 0
+        val wire = alerts.mapNotNull { RelayPolicy.outgoing(it) }
+        if (wire.isEmpty()) return 0
+        var delivered = 0
+        for (peer in targets) {
+            if (sendOne(peer.endpointId, wire)) delivered++
         }
-        if (wire.isEmpty()) return
+        return delivered
+    }
+
+    private fun sendOne(endpointId: String, wire: List<Alert>): Boolean {
+        val chunks = chunk(wire)
+        var sent = false
+        for (chunkAlerts in chunks) {
+            val clips = ArrayList<ClipLink>()
+            val files = ArrayList<Payload>()
+            for (alert in chunkAlerts) {
+                val path = alert.audioPath ?: continue
+                val file = File(path)
+                if (!file.exists() || file.length() !in 45..MAX_CLIP_BYTES) continue
+                val payload = try {
+                    Payload.fromFile(file)
+                } catch (error: Exception) {
+                    Log.w(TAG, "clip payload failed for ${alert.id}", error)
+                    continue
+                }
+                clips += ClipLink(alert.id, payload.id)
+                files += payload
+            }
+            val bytes = AlertJson.encodeEnvelope(chunkAlerts, clips).toByteArray(Charsets.UTF_8)
+            if (bytes.size > MAX_PAYLOAD) {
+                Log.w(TAG, "skipping oversized alert payload (${bytes.size} bytes)")
+                continue
+            }
+            client.sendPayload(endpointId, Payload.fromBytes(bytes))
+            files.forEach { client.sendPayload(endpointId, it) }
+            sent = true
+        }
+        return sent
+    }
+
+    private fun chunk(wire: List<Alert>): List<List<Alert>> {
         val chunks = ArrayList<List<Alert>>()
         var current = ArrayList<Alert>()
         for (alert in wire) {
@@ -91,83 +144,150 @@ class NearbyRelay(
             }
         }
         if (current.isNotEmpty()) chunks += current
-        for (chunk in chunks) {
-            val bytes = AlertJson.encodeEnvelope(chunk).toByteArray(Charsets.UTF_8)
-            if (bytes.size > MAX_PAYLOAD) {
-                Log.w(TAG, "skipping oversized alert payload (${bytes.size} bytes)")
-                continue
+        return chunks
+    }
+
+    private fun publish(message: String) {
+        onStatus(endpoints.snapshot(), message)
+    }
+
+    private fun handleBytes(fromEndpoint: String, payload: Payload) {
+        val bytes = payload.asBytes() ?: return
+        val packet = try {
+            AlertJson.decodeEnvelope(bytes.toString(Charsets.UTF_8))
+        } catch (error: Exception) {
+            Log.w(TAG, "bad payload", error)
+            return
+        }
+        val fresh = store.ingest(packet.alerts)
+        val attachedNow = HashSet<String>()
+        for (link in packet.clips) {
+            val ready = synchronized(clipLock) {
+                payloadToAlert[link.payloadId] = link.alertId
+                completedFiles.remove(link.payloadId)
             }
-            endpoints.forEach { endpoint ->
-                client.sendPayload(endpoint, Payload.fromBytes(bytes))
+            if (ready != null && storeClip(link.alertId, ready, fromEndpoint)) {
+                attachedNow += link.alertId
             }
+        }
+        if (fresh.isNotEmpty() || attachedNow.isNotEmpty()) onAlertsChanged()
+        val pendingForward = fresh.filter { it.id !in attachedNow }
+        if (pendingForward.isNotEmpty()) send(pendingForward, exceptEndpoint = fromEndpoint)
+        if (fresh.isNotEmpty()) {
+            publish("Received ${fresh.size} alert${if (fresh.size == 1) "" else "s"}")
         }
     }
 
-    private fun publishStatus(message: String) {
-        onStatus(connected.size, message)
+    private fun handleFileSuccess(payloadId: Long, fromEndpoint: String) {
+        val payload = synchronized(clipLock) { incomingPayloads.remove(payloadId) } ?: return
+        if (payload.type != Payload.Type.FILE) return
+        val javaFile = payload.asFile()?.asJavaFile() ?: return
+        val temp = File(clipsDir, "pending-$payloadId.wav")
+        if (!copyClip(javaFile, temp)) return
+        val alertId = synchronized(clipLock) {
+            val known = payloadToAlert[payloadId]
+            if (known == null) {
+                completedFiles[payloadId] = temp
+                null
+            } else {
+                known
+            }
+        }
+        if (alertId != null && storeClip(alertId, temp, fromEndpoint)) onAlertsChanged()
+    }
+
+    private fun storeClip(alertId: String, source: File, fromEndpoint: String?): Boolean {
+        if (!source.exists()) return false
+        if (source.length() !in 45..MAX_CLIP_BYTES) return false
+        val current = store.find(alertId) ?: return false
+        val existing = current.audioPath
+        if (existing != null && File(existing).let { it.exists() && it.length() > WavPcm.HEADER_BYTES }) {
+            return false
+        }
+        val dest = WavPcm.clipFile(clipsDir, alertId)
+        if (!copyClip(source, dest)) return false
+        store.attachAudio(alertId, dest.absolutePath)
+        val updated = store.find(alertId) ?: return true
+        send(listOf(updated), exceptEndpoint = fromEndpoint)
+        return true
+    }
+
+    private fun copyClip(source: File, dest: File): Boolean {
+        return try {
+            dest.parentFile?.mkdirs()
+            source.copyTo(dest, overwrite = true)
+            dest.length() in 45..MAX_CLIP_BYTES
+        } catch (error: Exception) {
+            Log.w(TAG, "clip copy failed", error)
+            false
+        }
     }
 
     private val payloadCallback = object : PayloadCallback() {
         override fun onPayloadReceived(endpointId: String, payload: Payload) {
-            val bytes = payload.asBytes() ?: return
-            val incoming = try {
-                AlertJson.decodeEnvelope(bytes.toString(Charsets.UTF_8))
-            } catch (error: Exception) {
-                Log.w(TAG, "bad payload", error)
-                return
+            when (payload.type) {
+                Payload.Type.BYTES -> handleBytes(endpointId, payload)
+                Payload.Type.FILE -> synchronized(clipLock) { incomingPayloads[payload.id] = payload }
+                else -> Unit
             }
-            val fresh = store.ingest(incoming)
-            if (fresh.isEmpty()) return
-            onAlertsChanged()
-            send(fresh, exceptEndpoint = endpointId)
-            publishStatus("Received ${fresh.size} alert${if (fresh.size == 1) "" else "s"}")
         }
 
-        override fun onPayloadTransferUpdate(endpointId: String, update: PayloadTransferUpdate) = Unit
+        override fun onPayloadTransferUpdate(endpointId: String, update: PayloadTransferUpdate) {
+            if (update.status != PayloadTransferUpdate.Status.SUCCESS) return
+            handleFileSuccess(update.payloadId, endpointId)
+        }
     }
 
     private val connectionCallback = object : ConnectionLifecycleCallback() {
         override fun onConnectionInitiated(endpointId: String, info: ConnectionInfo) {
+            val name = info.endpointName.orEmpty()
+            endpoints.rememberName(endpointId, name)
+            if (!endpoints.allows(name)) {
+                client.rejectConnection(endpointId)
+                endpoints.markConnectFailed(endpointId)
+                return
+            }
             client.acceptConnection(endpointId, payloadCallback)
         }
 
         override fun onConnectionResult(endpointId: String, result: ConnectionResolution) {
-            pending.remove(endpointId)
             if (result.status.isSuccess) {
-                connected.add(endpointId)
-                publishStatus("Connected to a nearby phone")
+                endpoints.markConnected(endpointId, "Nearby phone", System.currentTimeMillis())
+                publish("Connected to a nearby phone")
                 send(store.snapshot(), exceptEndpoint = null)
             } else {
+                endpoints.markConnectFailed(endpointId)
                 Log.w(TAG, "connection failed ${result.status}")
             }
         }
 
         override fun onDisconnected(endpointId: String) {
-            connected.remove(endpointId)
-            pending.remove(endpointId)
-            publishStatus(if (connected.isEmpty()) "Looking for nearby Saklolo phones" else "A phone disconnected")
+            endpoints.markDisconnected(endpointId)
+            val peers = endpoints.snapshot()
+            publish(if (peers.isEmpty()) "Looking for nearby B-LINK phones" else "A phone disconnected")
         }
     }
 
     private val discoveryCallback = object : EndpointDiscoveryCallback() {
         override fun onEndpointFound(endpointId: String, info: DiscoveredEndpointInfo) {
-            if (!running || endpointId in connected || endpointId in pending) return
-            pending.add(endpointId)
-            client.requestConnection(localName, endpointId, connectionCallback)
+            val name = info.endpointName.orEmpty()
+            if (!endpoints.tryBeginConnect(endpointId, name)) return
+            client.requestConnection(endpoints.localName(), endpointId, connectionCallback)
                 .addOnFailureListener {
-                    pending.remove(endpointId)
+                    endpoints.markConnectFailed(endpointId)
                     Log.w(TAG, "requestConnection failed", it)
                 }
         }
 
         override fun onEndpointLost(endpointId: String) {
-            pending.remove(endpointId)
+            endpoints.onLost(endpointId)
         }
     }
 
     companion object {
         private const val TAG = "SakloloRelay"
-        private const val SERVICE_ID = "ph.appbuilders.saklolo.relay"
+        const val SERVICE_ID = "ph.appbuilders.saklolo.relay"
         private const val MAX_PAYLOAD = 32 * 1024
+        private const val MAX_CLIP_BYTES = 1_000_000
     }
 }

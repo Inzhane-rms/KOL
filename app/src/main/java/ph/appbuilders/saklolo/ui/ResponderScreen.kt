@@ -1,170 +1,152 @@
 package ph.appbuilders.saklolo.ui
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.IntrinsicSize
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import ph.appbuilders.saklolo.RelayUiState
+import androidx.compose.ui.unit.sp
 import ph.appbuilders.saklolo.model.Alert
-import ph.appbuilders.saklolo.ui.theme.color
+import ph.appbuilders.saklolo.ui.theme.Ink
+import ph.appbuilders.saklolo.ui.theme.InkSoft
+import ph.appbuilders.saklolo.ui.theme.SafeGreen
+import ph.appbuilders.saklolo.ui.theme.stripe
 
 @Composable
 fun ResponderScreen(
     alerts: List<Alert>,
-    relay: RelayUiState,
-    contentPadding: PaddingValues,
-    onRelay: (Boolean) -> Unit,
+    notice: String?,
+    clipReady: (Alert) -> Boolean,
     onScan: () -> Unit,
     onDelete: (String) -> Unit,
-    qrFor: (Alert) -> String,
+    onShowQr: (Alert) -> Unit,
+    onPlay: (Alert) -> Unit,
     onDismissNotice: () -> Unit,
 ) {
-    var qrAlert by remember { mutableStateOf<Alert?>(null) }
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(contentPadding),
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
-            Text("Responder feed", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+        Column(Modifier.fillMaxWidth().glass().padding(16.dp)) {
+            Text(formatCounts(alerts), color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            Text("Sorted by urgency, then newest", color = InkSoft, fontSize = 14.sp)
+            TextButton(onClick = onScan, modifier = Modifier.height(56.dp)) {
+                Text("Scan QR", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+        notice?.let { message ->
             Text(
-                "Critical alerts stay on top. Phones rebroadcast what they have not seen yet.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            Row(
+                text = message,
+                color = Ink,
+                fontSize = 16.sp,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(if (relay.enabled) "Relay on" else "Relay off", fontWeight = FontWeight.Bold)
-                    Text(
-                        relay.message + if (relay.peers > 0) " · ${relay.peers} connected" else "",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Switch(checked = relay.enabled, onCheckedChange = onRelay)
-            }
-            OutlinedButton(onClick = onScan, modifier = Modifier.padding(top = 8.dp)) {
-                Text("Scan alert QR")
-            }
-            relay.notice?.let { notice ->
-                TextButton(onClick = onDismissNotice) { Text(notice) }
-            }
+                    .glass(20.dp)
+                    .padding(16.dp)
+                    .clickable(onClick = onDismissNotice),
+            )
         }
         if (alerts.isEmpty()) {
             Text(
-                "No alerts yet. Record one on the SOS tab, or receive one from a nearby phone.",
-                modifier = Modifier.padding(horizontal = 20.dp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                text = "No alerts on this phone yet. Record an SOS, or wait for a nearby phone.",
+                color = Ink,
+                fontSize = 18.sp,
+                modifier = Modifier.fillMaxWidth().glass().padding(16.dp),
             )
         }
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            items(alerts, key = { it.id }) { alert ->
-                AlertCard(alert, onDelete = { onDelete(alert.id) }, onQr = { qrAlert = alert })
-            }
+        alerts.forEach { alert ->
+            FeedCard(
+                alert = alert,
+                canPlay = clipReady(alert),
+                onPlay = { onPlay(alert) },
+                onDelete = { onDelete(alert.id) },
+                onShowQr = { onShowQr(alert) },
+            )
         }
-    }
-    qrAlert?.let { alert ->
-        val bitmap = remember(alert.id, alert.summary) { qrBitmap(qrFor(alert)) }
-        AlertDialog(
-            onDismissRequest = { qrAlert = null },
-            confirmButton = { TextButton(onClick = { qrAlert = null }) { Text("Close") } },
-            title = { Text(alert.summary) },
-            text = {
-                Column {
-                    Image(
-                        bitmap = bitmap.asImageBitmap(),
-                        contentDescription = "QR code for this alert",
-                        modifier = Modifier.fillMaxWidth(),
-                        contentScale = ContentScale.FillWidth,
-                    )
-                    Text(
-                        "The other phone can scan this with Saklolo if nearby radio does not connect.",
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                }
-            },
-        )
     }
 }
 
 @Composable
-private fun AlertCard(alert: Alert, onDelete: () -> Unit, onQr: () -> Unit) {
-    var expanded by remember(alert.id) { mutableStateOf(false) }
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-        shape = RoundedCornerShape(16.dp),
+private fun FeedCard(
+    alert: Alert,
+    canPlay: Boolean,
+    onPlay: () -> Unit,
+    onDelete: () -> Unit,
+    onShowQr: () -> Unit,
+) {
+    var open by rememberSaveable(alert.id) { mutableStateOf(false) }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(IntrinsicSize.Min)
+            .glass(),
     ) {
-        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
-            Spacer(
-                Modifier
-                    .width(8.dp)
-                    .fillMaxHeight()
-                    .background(alert.urgency.color()),
-            )
-            Column(Modifier.padding(14.dp).weight(1f)) {
-                Text(alert.urgency.label, color = alert.urgency.color(), fontWeight = FontWeight.Black)
-                Text(alert.summary, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text(
-                    "${formatWhen(alert.createdAtMillis)} · ${formatGps(alert.lat, alert.lon)} · ${hopLabel(alert.hops)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-                if (expanded && alert.transcript.isNotBlank()) {
-                    Text(alert.transcript, modifier = Modifier.padding(top = 8.dp))
+        Box(
+            Modifier
+                .width(6.dp)
+                .fillMaxHeight()
+                .background(alert.urgency.stripe()),
+        )
+        Column(
+            Modifier
+                .weight(1f)
+                .clickable { open = !open }
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                UrgencyChip(alert.urgency)
+                SourcePill(alert.summarySource)
+                if (canPlay) {
+                    Box(Modifier.weight(1f))
+                    PlayButton(onClick = onPlay)
                 }
+            }
+            Text(alert.summary, color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            Text(
+                text = "${formatHops(alert.hops)} · ${formatWhen(alert.createdAtMillis)} · ${formatGps(alert.lat, alert.lon)}",
+                color = InkSoft,
+                fontSize = 14.sp,
+            )
+            if (open) {
+                Text(alert.transcript, color = Ink, fontSize = 18.sp)
                 Row {
-                    TextButton(onClick = { expanded = !expanded }) {
-                        Text(if (expanded) "Hide transcript" else "Transcript")
+                    TextButton(onClick = onShowQr, modifier = Modifier.height(56.dp)) {
+                        Text("QR", color = Ink, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                     }
-                    TextButton(onClick = onQr) { Text("QR") }
-                    IconButton(onClick = onDelete) {
-                        Icon(Icons.Filled.Delete, contentDescription = "Delete alert")
+                    TextButton(onClick = onDelete, modifier = Modifier.height(56.dp)) {
+                        Text("Delete", color = InkSoft, fontSize = 16.sp)
                     }
                 }
             }
@@ -172,8 +154,16 @@ private fun AlertCard(alert: Alert, onDelete: () -> Unit, onQr: () -> Unit) {
     }
 }
 
-private fun hopLabel(hops: Int): String = when (hops) {
-    0 -> "recorded here or direct"
-    1 -> "1 hop"
-    else -> "$hops hops"
+@Composable
+fun PlayButton(onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(56.dp)
+            .clip(CircleShape)
+            .background(SafeGreen)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(Icons.Filled.PlayArrow, contentDescription = "Play voice clip", tint = Color.White)
+    }
 }

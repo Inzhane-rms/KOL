@@ -14,6 +14,12 @@ data class Alert(
     val lon: Double? = null,
     val hops: Int = 0,
     val language: String = "AUTO",
+    /** "AI" when Gemma refined the line, otherwise "RULES". Urgency is always rules. */
+    val summarySource: String = "RULES",
+    /** Local wav path. Never put this on the wire. */
+    val audioPath: String? = null,
+    /** How many nearby phones this device handed the alert to. Local only. */
+    val deliveredCount: Int = 0,
 )
 
 fun List<Alert>.sortedForFeed(): List<Alert> =

@@ -3,23 +3,28 @@ package ph.appbuilders.saklolo.relay
 import ph.appbuilders.saklolo.model.Alert
 
 /**
- * Store-and-forward rules for the mesh.
+ * Store-and-forward rules.
  *
- * A newly recorded alert has hops = 0. Each phone that did not create it
- * rebroadcasts a copy with hops + 1. Alerts are not forwarded once the hop
- * count would pass [MAX_HOPS] (about five relays past the sender).
+ * The phone that records an alert keeps hops = 0 and sends that 0 unchanged.
+ * Each phone that receives a copy stores hops + 1. A direct receipt is therefore
+ * 1 hop. Forwarding does not increment again. An alert is not stored when the
+ * incremented count would pass [MAX_HOPS], and it is not forwarded once the
+ * stored count has reached [MAX_HOPS].
  */
 object RelayPolicy {
     const val MAX_HOPS = 5
 
-    fun shouldStore(alert: Alert, knownIds: Set<String>): Boolean {
-        if (alert.id.isBlank() || alert.id in knownIds) return false
-        return alert.hops in 0..MAX_HOPS
-    }
-
-    fun outgoing(alert: Alert, localOrigin: Boolean): Alert? {
-        val hop = if (localOrigin) alert.hops else alert.hops + 1
+    /** Copy stored on receive, or null when the id is blank or the next hop is too far. */
+    fun receive(alert: Alert): Alert? {
+        if (alert.id.isBlank()) return null
+        val hop = alert.hops + 1
         if (hop > MAX_HOPS) return null
         return alert.copy(hops = hop)
+    }
+
+    /** Forward the stored hop count unchanged. */
+    fun outgoing(alert: Alert): Alert? {
+        if (alert.hops >= MAX_HOPS) return null
+        return alert
     }
 }
