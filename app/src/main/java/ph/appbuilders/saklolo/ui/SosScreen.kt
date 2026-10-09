@@ -26,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DirectionsRun
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -80,6 +81,7 @@ fun SosScreen(
     onTopic: (String) -> Unit,
     onOpenAlerts: () -> Unit,
     micBlocked: Boolean = false,
+    micGranted: Boolean = true,
     preciseBlocked: Boolean = false,
     onOpenAppSettings: () -> Unit = {},
 ) {
@@ -96,9 +98,6 @@ fun SosScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         StatusPills(state.gemmaLoading, peers.size, location, onOpenSettings)
-        if (micBlocked) {
-            MicBlockedCard(onOpenAppSettings)
-        }
         if (preciseBlocked) {
             PreciseLocationCard(onOpenAppSettings)
         }
@@ -127,6 +126,7 @@ fun SosScreen(
                 enabled = state.modelReady,
                 onHoldStart = onHoldStart,
                 onHoldEnd = onHoldEnd,
+                dimmed = !micGranted,
             )
         }
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -140,6 +140,9 @@ fun SosScreen(
                     .background(Ink)
                     .padding(horizontal = 14.dp, vertical = 8.dp),
             )
+        }
+        if (micBlocked) {
+            MicBlockedCard(onOpenAppSettings)
         }
         if (state.actionable && state.urgency != null) {
             DraftCard(state, onTranscript, onSend, onDiscard)
@@ -222,10 +225,34 @@ private fun StatusPills(gemmaLoading: Boolean, peers: Int, location: Pair<Double
 
 @Composable
 private fun MicBlockedCard(onOpenAppSettings: () -> Unit) {
-    SettingsCard(
-        "The microphone is blocked. Allow it in settings to record an SOS.",
-        onOpenAppSettings,
-    )
+    Column(
+        Modifier.fillMaxWidth().softCard(RoundedCornerShape(24.dp)).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Box(
+                Modifier.size(40.dp).clip(CircleShape).background(LightRed),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.Mic, contentDescription = null, tint = Accent, modifier = Modifier.size(20.dp))
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.weight(1f)) {
+                Text("Kailangan ang mikropono", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text("Allow mic access to record an SOS.", color = InkSoft, fontSize = 13.sp)
+            }
+        }
+        Text(
+            "Buksan ang Settings",
+            color = Color.White,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier
+                .clip(RoundedCornerShape(20.dp))
+                .background(Ink)
+                .clickable(onClick = onOpenAppSettings)
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+        )
+    }
 }
 
 @Composable

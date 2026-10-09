@@ -40,6 +40,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
@@ -151,6 +152,7 @@ fun SosOrb(
     enabled: Boolean,
     onHoldStart: () -> Unit,
     onHoldEnd: () -> Unit,
+    dimmed: Boolean = false,
 ) {
     var pressed by remember { mutableStateOf(false) }
     val recordingNow by rememberUpdatedState(recording)
@@ -213,6 +215,7 @@ fun SosOrb(
             modifier = Modifier
                 .size(184.dp)
                 .scale(pressScale)
+                .alpha(if (dimmed) 0.5f else 1f)
                 .shadow(8.dp, CircleShape, ambientColor = ButtonShadow, spotColor = ButtonShadow)
                 .clip(CircleShape)
                 .background(

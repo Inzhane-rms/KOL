@@ -73,6 +73,7 @@ fun SakloloApp(viewModel: SakloloViewModel) {
     var askedBattery by remember { mutableStateOf(false) }
     var askedMic by remember { mutableStateOf(false) }
     var micBlocked by remember { mutableStateOf(false) }
+    var micGranted by remember { mutableStateOf(hasPermission(context, Manifest.permission.RECORD_AUDIO)) }
     var preciseBlocked by remember { mutableStateOf(false) }
 
     val permissions = rememberLauncherForActivityResult(
@@ -82,7 +83,13 @@ fun SakloloApp(viewModel: SakloloViewModel) {
         val locationOk = granted[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
             granted[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         if (locationOk) viewModel.onLocationPermissionGranted()
-        syncPermissions(context, askedMic = true, onMicBlocked = { micBlocked = it }, onPreciseBlocked = { preciseBlocked = it })
+        syncPermissions(
+            context,
+            askedMic = true,
+            onMicBlocked = { micBlocked = it },
+            onMicGranted = { micGranted = it },
+            onPreciseBlocked = { preciseBlocked = it },
+        )
         if (!askedBattery) {
             askedBattery = true
             (context as? Activity)?.let { askBatteryExemption(it) }
@@ -98,7 +105,13 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                 val locationOk = hasPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ||
                     hasPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION)
                 if (locationOk) viewModel.onLocationPermissionGranted()
-                syncPermissions(context, askedMic, onMicBlocked = { micBlocked = it }, onPreciseBlocked = { preciseBlocked = it })
+                syncPermissions(
+                    context,
+                    askedMic,
+                    onMicBlocked = { micBlocked = it },
+                    onMicGranted = { micGranted = it },
+                    onPreciseBlocked = { preciseBlocked = it },
+                )
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -107,11 +120,23 @@ fun SakloloApp(viewModel: SakloloViewModel) {
 
     LaunchedEffect(Unit) {
         if (RelayPermissions.needsPreciseChoice(context)) {
-            syncPermissions(context, askedMic, onMicBlocked = { micBlocked = it }, onPreciseBlocked = { preciseBlocked = it })
+            syncPermissions(
+                context,
+                askedMic,
+                onMicBlocked = { micBlocked = it },
+                onMicGranted = { micGranted = it },
+                onPreciseBlocked = { preciseBlocked = it },
+            )
         } else if (!RelayPermissions.granted(context)) {
             permissions.launch(requiredPermissions())
         } else {
-            syncPermissions(context, askedMic, onMicBlocked = { micBlocked = it }, onPreciseBlocked = { preciseBlocked = it })
+            syncPermissions(
+                context,
+                askedMic,
+                onMicBlocked = { micBlocked = it },
+                onMicGranted = { micGranted = it },
+                onPreciseBlocked = { preciseBlocked = it },
+            )
         }
     }
 
@@ -141,6 +166,7 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                 clipReady = viewModel::clipReady,
                 onHoldStart = {
                     if (hasPermission(context, Manifest.permission.RECORD_AUDIO)) {
+                        micGranted = true
                         micBlocked = false
                         viewModel.startRecording()
                     } else if (micIsPermanentlyDenied(context)) {
@@ -163,6 +189,7 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                 },
                 onOpenAlerts = { route = FEED },
                 micBlocked = micBlocked,
+                micGranted = micGranted,
                 preciseBlocked = preciseBlocked,
                 onOpenAppSettings = { openAppSettings(context) },
             )
@@ -266,9 +293,11 @@ private fun syncPermissions(
     context: Context,
     askedMic: Boolean,
     onMicBlocked: (Boolean) -> Unit,
+    onMicGranted: (Boolean) -> Unit,
     onPreciseBlocked: (Boolean) -> Unit,
 ) {
     onPreciseBlocked(RelayPermissions.needsPreciseChoice(context))
+    onMicGranted(hasPermission(context, Manifest.permission.RECORD_AUDIO))
     if (RelayPermissions.granted(context)) {
         ContextCompat.startForegroundService(context, Intent(context, RelayService::class.java))
     }
