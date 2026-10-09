@@ -4,14 +4,18 @@ import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import ph.appbuilders.saklolo.stt.PendingAbort
+import ph.appbuilders.saklolo.stt.TranscriptLimit
 import ph.appbuilders.saklolo.stt.WhisperEngine
 import ph.appbuilders.saklolo.stt.WhisperTranscriber
 
@@ -36,6 +40,8 @@ class WhisperReleaseTest {
             }
 
             override fun requestAbort() = Unit
+
+            override fun clearPendingAbort() = Unit
 
             override fun transcribe(
                 contextPtr: Long,
@@ -73,5 +79,50 @@ class WhisperReleaseTest {
         assertNotSame(caller, freeThread.get())
         assertTrue(order.indexOf("transcribe-done") < order.indexOf("free:7"))
         assertEquals(1, order.count { it.startsWith("free:") })
+    }
+
+    @Test
+    fun abortRequestedBeforeADecodeStartsAbortsThatDecodeAndTheNextOneRuns() = runBlocking {
+        val calls = AtomicInteger(0)
+        val engine = object : WhisperEngine {
+            override fun initContext(modelPath: String): Long = 1L
+            override fun freeContext(contextPtr: Long) = Unit
+            override fun requestAbort() = Unit
+            override fun clearPendingAbort() = Unit
+            override fun transcribe(
+                contextPtr: Long,
+                audio: FloatArray,
+                threads: Int,
+                language: String,
+                prompt: String,
+                beam: Int,
+                budgetMs: Long,
+            ): String {
+                calls.incrementAndGet()
+                return "tabang"
+            }
+        }
+        val worker = Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "saklolo-whisper")
+        }
+        val transcriber = WhisperTranscriber(File("model.bin"), engine, worker)
+        transcriber.abort()
+        assertEquals(TranscriptLimit.UNAVAILABLE, transcriber.transcribe(floatArrayOf(0.2f), "tl"))
+        assertEquals(0, calls.get())
+        assertEquals("tabang", transcriber.transcribe(floatArrayOf(0.2f), "tl"))
+        assertEquals(1, calls.get())
+        worker.shutdown()
+    }
+
+    @Test
+    fun pendingAbortStaysSetUntilTheNextDecodeConsumesIt() {
+        val pending = PendingAbort()
+        assertFalse(pending.consume())
+        pending.request()
+        pending.request()
+        assertTrue(pending.consume())
+        assertFalse(pending.consume())
+        pending.request()
+        assertTrue(pending.consume())
     }
 }

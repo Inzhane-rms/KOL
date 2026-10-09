@@ -17,7 +17,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -42,6 +41,7 @@ import ph.appbuilders.saklolo.contact.Ptt
 import ph.appbuilders.saklolo.contact.RingLoop
 import ph.appbuilders.saklolo.contact.ClipCommit
 import ph.appbuilders.saklolo.contact.VoiceControl
+import ph.appbuilders.saklolo.contact.WipeLaunch
 import ph.appbuilders.saklolo.contact.WipeSessions
 import ph.appbuilders.saklolo.ask.AskEngine
 import ph.appbuilders.saklolo.ask.AskResult
@@ -589,7 +589,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Clears local messages, contacts, clips, and preferences. The speech model file stays. */
-    fun deleteAllData() {
+    fun deleteAllData(onCleared: () -> Unit = {}) {
         val next = WipeSessions(holdSession, voiceEpoch, voiceSession, recordGeneration).bump()
         voiceEpoch = next.epoch
         voiceSession = next.voice
@@ -620,46 +620,58 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
             releaseCallAudio()
             publishCall(emergency = null)
         }
-        runBlocking {
-            recordGate.withLock {
-                if (recorder.isRunning) {
-                    runtime.relay.onLocalRecordingFinished()
-                    recorder.stop()
-                }
-            }
-            withContext(Dispatchers.IO) {
-                for (out in endPayloads) {
-                    val body = when (out.kind) {
-                        Ptt.END -> "End"
-                        Ptt.ACCEPT -> "Accept"
-                        else -> "Decline"
-                    }
-                    val message = DirectMessage(
-                        id = java.util.UUID.randomUUID().toString(),
-                        fromDeviceId = deviceId(),
-                        toDeviceId = out.peerId,
-                        senderName = displayName(),
-                        body = body,
-                        createdAtMillis = System.currentTimeMillis(),
-                        kind = out.kind,
-                    )
-                    runtime.directStore.addLocal(message)
-                    runtime.relay.broadcastDirect(message)
-                }
-                runtime.wipeUserData {
-                    replyCache.clear()
-                    _modelReplies.value = emptyMap()
-                }
-                Waveform.clear()
+        WipeLaunch.tryStop(recordGate) {
+            if (recorder.isRunning) {
+                runtime.relay.onLocalRecordingFinished()
+                recorder.stop()
             }
         }
-        threadRead.clear()
-        _call.value = CallUi()
-        _voice.value = VoiceUiState()
-        _sos.update { it.copy(recording = false, elapsedSec = 0, transcript = "", summary = "", urgency = null) }
-        _threads.value = emptyList()
-        _wipeEpoch.value += 1
-        _notice.value = null
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    WipeLaunch.finishCallThenStop(
+                        callActive = endPayloads.isNotEmpty(),
+                        sendEnd = {
+                            for (out in endPayloads) {
+                                val body = when (out.kind) {
+                                    Ptt.END -> "End"
+                                    Ptt.ACCEPT -> "Accept"
+                                    else -> "Decline"
+                                }
+                                val message = DirectMessage(
+                                    id = java.util.UUID.randomUUID().toString(),
+                                    fromDeviceId = deviceId(),
+                                    toDeviceId = out.peerId,
+                                    senderName = displayName(),
+                                    body = body,
+                                    createdAtMillis = System.currentTimeMillis(),
+                                    kind = out.kind,
+                                )
+                                runtime.directStore.addLocal(message)
+                                runtime.relay.broadcastDirect(message)
+                            }
+                        },
+                        waitForSend = { runtime.relay.awaitOutbound(WipeLaunch.END_CALL_WINDOW_MS) },
+                        stopRelay = {
+                            runtime.wipeUserData {
+                                replyCache.clear()
+                                _modelReplies.value = emptyMap()
+                            }
+                            Waveform.clear()
+                        },
+                    )
+                }
+            } finally {
+                threadRead.clear()
+                _call.value = CallUi()
+                _voice.value = VoiceUiState()
+                _sos.update { it.copy(recording = false, elapsedSec = 0, transcript = "", summary = "", urgency = null) }
+                _threads.value = emptyList()
+                _wipeEpoch.value += 1
+                _notice.value = null
+                onCleared()
+            }
+        }
     }
 
     fun setupSeen(): Boolean = runtime.settings.setupSeen

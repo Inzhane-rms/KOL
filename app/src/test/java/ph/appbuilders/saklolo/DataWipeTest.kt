@@ -1,6 +1,7 @@
 package ph.appbuilders.saklolo
 
 import java.io.File
+import kotlinx.coroutines.sync.Mutex
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -12,7 +13,9 @@ import ph.appbuilders.saklolo.contact.DirectStore
 import ph.appbuilders.saklolo.contact.MemoryDirectPersistence
 import ph.appbuilders.saklolo.contact.ReplyCache
 import ph.appbuilders.saklolo.contact.ReplyChip
+import ph.appbuilders.saklolo.contact.WipeLaunch
 import ph.appbuilders.saklolo.contact.WipeSessions
+import ph.appbuilders.saklolo.data.SentAtMigration
 import ph.appbuilders.saklolo.group.GroupNote
 import ph.appbuilders.saklolo.group.GroupPersistence
 import ph.appbuilders.saklolo.group.GroupSnapshot
@@ -203,6 +206,65 @@ class DataWipeTest {
         assertTrue(source.contains("fun resolve(context: Context): File = installedFile(context)"))
     }
 
+    @Test
+    fun deleteDoesNotBlockWhileTheRecorderLockIsHeld() {
+        val gate = Mutex()
+        assertTrue(gate.tryLock())
+        var stopped = false
+        val started = System.nanoTime()
+        val ran = WipeLaunch.tryStop(gate) { stopped = true }
+        val elapsedMs = (System.nanoTime() - started) / 1_000_000
+        assertFalse(ran)
+        assertFalse(stopped)
+        assertTrue("tryStop waited ${elapsedMs}ms while the recorder lock was held", elapsedMs < 50)
+        gate.unlock()
+        assertTrue(WipeLaunch.tryStop(gate) { stopped = true })
+        assertTrue(stopped)
+        val source = viewModelSource()
+        assertFalse(source.contains("runBlocking"))
+        assertTrue(source.contains("viewModelScope.launch"))
+        assertTrue(source.contains("withContext(Dispatchers.IO)"))
+        assertTrue(source.contains("WipeLaunch.tryStop"))
+    }
+
+    @Test
+    fun endCallGoesOutBeforeTheRelayStops() {
+        val duringCall = mutableListOf<String>()
+        WipeLaunch.finishCallThenStop(
+            callActive = true,
+            sendEnd = { duringCall += "end" },
+            waitForSend = { duringCall += "wait" },
+            stopRelay = { duringCall += "stop" },
+        )
+        assertEquals(listOf("end", "wait", "stop"), duringCall)
+        val idle = mutableListOf<String>()
+        WipeLaunch.finishCallThenStop(
+            callActive = false,
+            sendEnd = { idle += "end" },
+            waitForSend = { idle += "wait" },
+            stopRelay = { idle += "stop" },
+        )
+        assertEquals(listOf("stop"), idle)
+        assertEquals(500L, WipeLaunch.END_CALL_WINDOW_MS)
+        val source = viewModelSource()
+        val send = source.indexOf("broadcastDirect(message)")
+        val wait = source.indexOf("awaitOutbound(WipeLaunch.END_CALL_WINDOW_MS)")
+        val stop = source.indexOf("runtime.wipeUserData")
+        assertTrue(send in 0 until wait)
+        assertTrue(wait < stop)
+    }
+
+    @Test
+    fun migrationMarksExistingOutgoingRowsSent() {
+        val sql = mutableListOf<String>()
+        SentAtMigration.migrate { sql += it }
+        assertEquals(listOf(SentAtMigration.ADD_COLUMN, SentAtMigration.MARK_OUTGOING), sql)
+        assertTrue(SentAtMigration.MARK_OUTGOING.contains("sentAtMillis = createdAtMillis"))
+        assertTrue(SentAtMigration.MARK_OUTGOING.contains("localOrigin != 0"))
+        assertEquals(4_000L, SentAtMigration.sentAt(localOrigin = true, createdAtMillis = 4_000L))
+        assertEquals(0L, SentAtMigration.sentAt(localOrigin = false, createdAtMillis = 4_000L))
+    }
+
     private fun asset(name: String): String {
         val file = listOf(
             File("src/main/assets/legal/$name"),
@@ -215,6 +277,14 @@ class DataWipeTest {
         val file = listOf(
             File("src/main/res/values/strings.xml"),
             File("app/src/main/res/values/strings.xml"),
+        ).first { it.exists() }
+        return file.readText()
+    }
+
+    private fun viewModelSource(): String {
+        val file = listOf(
+            File("src/main/java/ph/appbuilders/saklolo/SakloloViewModel.kt"),
+            File("app/src/main/java/ph/appbuilders/saklolo/SakloloViewModel.kt"),
         ).first { it.exists() }
         return file.readText()
     }

@@ -15,6 +15,9 @@ internal object WhisperNative {
     external fun requestAbort()
 
     @JvmStatic
+    external fun clearPendingAbort()
+
+    @JvmStatic
     external fun transcribe(
         contextPtr: Long,
         audio: FloatArray,

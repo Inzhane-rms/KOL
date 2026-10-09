@@ -157,6 +157,14 @@ Java_ph_appbuilders_saklolo_stt_WhisperNative_requestAbort(
     g_cancel = 1;
 }
 
+JNIEXPORT void JNICALL
+Java_ph_appbuilders_saklolo_stt_WhisperNative_clearPendingAbort(
+        JNIEnv *env, jclass clazz) {
+    (void) env;
+    (void) clazz;
+    g_cancel = 0;
+}
+
 JNIEXPORT jstring JNICALL
 Java_ph_appbuilders_saklolo_stt_WhisperNative_transcribe(
         JNIEnv *env,
@@ -174,7 +182,11 @@ Java_ph_appbuilders_saklolo_stt_WhisperNative_transcribe(
         return NULL;
     }
 
-    g_cancel = 0;
+    /* An abort requested before this decode started is kept until the decode begins. */
+    if (g_cancel) {
+        g_cancel = 0;
+        return (*env)->NewStringUTF(env, "\x1e");
+    }
     struct whisper_context *ctx = (struct whisper_context *) ptr;
     jfloat *samples = (*env)->GetFloatArrayElements(env, audio, NULL);
     const jsize n_samples = (*env)->GetArrayLength(env, audio);
@@ -229,6 +241,10 @@ Java_ph_appbuilders_saklolo_stt_WhisperNative_transcribe(
     (*env)->ReleaseFloatArrayElements(env, audio, samples, JNI_ABORT);
     if (hint != NULL) {
         (*env)->ReleaseStringUTFChars(env, prompt, hint);
+    }
+    if (g_cancel) {
+        g_cancel = 0;
+        aborted = true;
     }
     if (rc != 0 && !aborted) {
         LOGE("whisper_full failed rc=%d", rc);

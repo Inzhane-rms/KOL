@@ -221,9 +221,29 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
     }
 }
 
+fun interface SqlRunner {
+    fun exec(sql: String)
+}
+
+/** Existing outgoing rows were already handed off. Their created time becomes the handoff time. */
+object SentAtMigration {
+    const val ADD_COLUMN =
+        "ALTER TABLE direct_messages ADD COLUMN sentAtMillis INTEGER NOT NULL DEFAULT 0"
+    const val MARK_OUTGOING =
+        "UPDATE direct_messages SET sentAtMillis = createdAtMillis WHERE localOrigin != 0"
+
+    fun migrate(db: SqlRunner) {
+        db.exec(ADD_COLUMN)
+        db.exec(MARK_OUTGOING)
+    }
+
+    fun sentAt(localOrigin: Boolean, createdAtMillis: Long): Long =
+        if (localOrigin) createdAtMillis else 0L
+}
+
 val MIGRATION_6_7 = object : Migration(6, 7) {
     override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL("ALTER TABLE direct_messages ADD COLUMN sentAtMillis INTEGER NOT NULL DEFAULT 0")
+        SentAtMigration.migrate { db.execSQL(it) }
     }
 }
 

@@ -317,6 +317,36 @@ data class WipeSessions(val hold: Int, val epoch: Int, val voice: Int, val recor
     fun bump(): WipeSessions = WipeSessions(hold + 1, epoch + 1, voice + 1, record + 1)
 }
 
+/** The wipe must return while a transcription still holds the recorder lock. */
+object WipeLaunch {
+    const val END_CALL_WINDOW_MS = 500L
+
+    /** False when the lock is already held. The caller does not wait. */
+    fun tryStop(gate: kotlinx.coroutines.sync.Mutex, stop: () -> Unit): Boolean {
+        if (!gate.tryLock()) return false
+        try {
+            stop()
+        } finally {
+            gate.unlock()
+        }
+        return true
+    }
+
+    /** End-call goes out, then the relay stops. With no call, the relay stops immediately. */
+    fun finishCallThenStop(
+        callActive: Boolean,
+        sendEnd: () -> Unit,
+        waitForSend: () -> Unit,
+        stopRelay: () -> Unit,
+    ) {
+        if (callActive) {
+            sendEnd()
+            waitForSend()
+        }
+        stopRelay()
+    }
+}
+
 class DirectStore(private val persistence: DirectPersistence) {
     private val lock = Any()
     private val messages = linkedMapOf<String, DirectMessage>()

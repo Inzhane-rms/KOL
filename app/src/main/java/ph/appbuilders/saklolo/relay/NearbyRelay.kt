@@ -166,6 +166,26 @@ class NearbyRelay(
         return peers.size
     }
 
+    /**
+     * Waits until work queued before this call has been attempted.
+     * Returns false when [timeoutMs] elapses first. The barrier always finishes, even if the queue was cancelled.
+     */
+    fun awaitOutbound(timeoutMs: Long): Boolean {
+        val done = java.util.concurrent.CountDownLatch(1)
+        val token = outbound.token()
+        synchronized(queueLock) {
+            liveJobs.addLast {
+                try {
+                    if (!outbound.live(token)) return@addLast
+                } finally {
+                    done.countDown()
+                }
+            }
+        }
+        io.execute { drain() }
+        return done.await(timeoutMs.coerceAtLeast(0L), java.util.concurrent.TimeUnit.MILLISECONDS)
+    }
+
     /** Drops queued sends. A job that already started checks the gate again before it hands off. */
     fun cancelOutbound() {
         outbound.cancel()

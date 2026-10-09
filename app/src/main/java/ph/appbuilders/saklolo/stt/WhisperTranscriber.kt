@@ -10,10 +10,22 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.withContext
 
+/** An abort stays set until a decode starts, so a request that arrives early is not dropped. */
+internal class PendingAbort {
+    private val requested = AtomicBoolean(false)
+
+    fun request() {
+        requested.set(true)
+    }
+
+    fun consume(): Boolean = requested.getAndSet(false)
+}
+
 internal interface WhisperEngine {
     fun initContext(modelPath: String): Long
     fun freeContext(contextPtr: Long)
     fun requestAbort()
+    fun clearPendingAbort()
     fun transcribe(
         contextPtr: Long,
         audio: FloatArray,
@@ -47,6 +59,10 @@ private object JniWhisperEngine : WhisperEngine {
 
     override fun requestAbort() {
         WhisperNative.requestAbort()
+    }
+
+    override fun clearPendingAbort() {
+        WhisperNative.clearPendingAbort()
     }
 
     override fun transcribe(
@@ -108,14 +124,20 @@ class WhisperTranscriber internal constructor(
     private var contextPtr: Long = 0
     private var beamLoaded = false
     private var beamEarned = false
+    private val pendingAbort = PendingAbort()
 
     fun abort() {
+        pendingAbort.request()
         engine.requestAbort()
     }
 
     @Suppress("UNUSED_PARAMETER")
     suspend fun transcribe(pcm16k: FloatArray, languageCode: String, names: List<String> = emptyList()): String = withContext(dispatcher) {
         if (released.get()) error("Speech model was released")
+        if (pendingAbort.consume()) {
+            engine.clearPendingAbort()
+            return@withContext TranscriptLimit.UNAVAILABLE
+        }
         val audio = SpeechPrep.prepare(pcm16k)
         if (audio.isEmpty()) return@withContext ""
         if (contextPtr == 0L) {

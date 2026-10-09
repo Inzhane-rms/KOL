@@ -603,15 +603,16 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                 settingsOpen = false
             },
             onDeleteAll = {
-                viewModel.deleteAllData()
-                termsOk = false
-                askName = viewModel.needsNamePrompt()
-                nameDraft = viewModel.displayName()
-                settingsOpen = false
-                aboutOpen = false
-                legalPage = null
-                route = HOME
-                peerId = ""
+                viewModel.deleteAllData {
+                    termsOk = false
+                    askName = viewModel.needsNamePrompt()
+                    nameDraft = viewModel.displayName()
+                    settingsOpen = false
+                    aboutOpen = false
+                    legalPage = null
+                    route = HOME
+                    peerId = ""
+                }
             },
         )
     }
