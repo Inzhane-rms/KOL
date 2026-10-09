@@ -12,14 +12,7 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.ActivityCompat
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -29,16 +22,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -49,17 +36,14 @@ import com.journeyapps.barcodescanner.ScanOptions
 import ph.appbuilders.saklolo.SakloloViewModel
 import ph.appbuilders.saklolo.group.recordIntent
 import ph.appbuilders.saklolo.group.RecordIntent
-import ph.appbuilders.saklolo.model.Alert
 import ph.appbuilders.saklolo.relay.RelayPermissions
 import ph.appbuilders.saklolo.relay.RelayService
-import ph.appbuilders.saklolo.triage.Urgency
 import ph.appbuilders.saklolo.ui.theme.Ink
-import ph.appbuilders.saklolo.ui.theme.Page
 
 private const val HOME = "home"
 private const val CHAT = "chat"
-private const val RECORD = "record"
-private const val ASK = "ask"
+private const val JOIN = "join"
+private const val FIND = "find"
 private const val FEED = "feed"
 
 @Composable
@@ -71,19 +55,15 @@ fun SakloloApp(viewModel: SakloloViewModel) {
     val sightings by viewModel.sightings.collectAsStateWithLifecycle()
     val activeGroup by viewModel.activeGroup.collectAsStateWithLifecycle()
     val voice by viewModel.voice.collectAsStateWithLifecycle()
-    val askTurns by viewModel.askTurns.collectAsStateWithLifecycle()
     val peers by viewModel.peers.collectAsStateWithLifecycle()
     val notice by viewModel.notice.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var route by remember { mutableStateOf(HOME) }
     var settingsOpen by remember { mutableStateOf(false) }
-    var qrAlert by remember { mutableStateOf<Alert?>(null) }
-    var groupQr by remember { mutableStateOf<Pair<String, String>?>(null) }
     var askedBattery by remember { mutableStateOf(false) }
     var askedMic by remember { mutableStateOf(false) }
     var micBlocked by remember { mutableStateOf(false) }
-    var micGranted by remember { mutableStateOf(hasPermission(context, Manifest.permission.RECORD_AUDIO)) }
     var askedLocation by remember { mutableStateOf(false) }
     var locationWarning by remember { mutableStateOf<String?>(null) }
 
@@ -100,7 +80,7 @@ fun SakloloApp(viewModel: SakloloViewModel) {
             askedMic = true,
             askedLocation = true,
             onMicBlocked = { micBlocked = it },
-            onMicGranted = { micGranted = it },
+            onMicGranted = {},
             onLocationWarning = { locationWarning = it },
         )
         if (!askedBattery) {
@@ -123,7 +103,7 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                     askedMic,
                     askedLocation,
                     onMicBlocked = { micBlocked = it },
-                    onMicGranted = { micGranted = it },
+                    onMicGranted = {},
                     onLocationWarning = { locationWarning = it },
                 )
             }
@@ -141,7 +121,7 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                 askedMic,
                 askedLocation,
                 onMicBlocked = { micBlocked = it },
-                onMicGranted = { micGranted = it },
+                onMicGranted = {},
                 onLocationWarning = { locationWarning = it },
             )
         } else {
@@ -149,136 +129,142 @@ fun SakloloApp(viewModel: SakloloViewModel) {
         }
     }
 
-    val location by viewModel.location.collectAsStateWithLifecycle()
-    val localAlerts = alerts.filter { viewModel.isLocalOrigin(it.id) }
-    val lastAlert = sos.sentAlertId?.let { id -> localAlerts.firstOrNull { it.id == id } }
-        ?: localAlerts.maxByOrNull { it.createdAtMillis }
-    val unrespondedCritical = alerts.count { it.urgency == Urgency.CRITICAL && !it.responding }
+    val chatRead by viewModel.chatReadMillis.collectAsStateWithLifecycle()
+    var displayName by remember { mutableStateOf(viewModel.displayName()) }
+    val heard = sightings.filter { activeGroup == null || it.groupId == activeGroup?.id }
+    val unread = groupNotes.count { note ->
+        val groupId = activeGroup?.id
+        groupId != null &&
+            note.groupId == groupId &&
+            note.sender != displayName &&
+            note.kind != "ping" &&
+            note.createdAtMillis > chatRead
+    }
+    val showSheet = voice.recording || voice.transcript.isNotBlank() || voice.status.isNotBlank()
+    LaunchedEffect(route) {
+        if (route == CHAT) viewModel.markChatRead()
+    }
 
-    Box(Modifier.fillMaxSize().background(Page)) {
-        if (route == ASK) {
-            AskScreen(
-                turns = askTurns,
-                onAsk = viewModel::submitAsk,
-                onOpenRecorder = { route = RECORD },
-            )
-        } else if (route == CHAT) {
-            GroupChatScreen(
+    fun ensureMic(onReady: () -> Unit) {
+        if (hasPermission(context, Manifest.permission.RECORD_AUDIO)) {
+            micBlocked = false
+            onReady()
+        } else if (micIsPermanentlyDenied(context)) {
+            askedMic = true
+            micBlocked = true
+        } else {
+            permissions.launch(requiredPermissions())
+        }
+    }
+
+    fun scanQr() {
+        if (hasPermission(context, Manifest.permission.CAMERA)) {
+            scanner.launch(scanOptions())
+        } else {
+            permissions.launch(requiredPermissions())
+        }
+    }
+
+    V16Frame(
+        peers = peers.size,
+        route = when (route) {
+            CHAT, JOIN -> CHAT
+            FIND -> FIND
+            FEED -> FEED
+            else -> HOME
+        },
+        unread = unread,
+        recording = voice.recording,
+        notice = notice,
+        onDismissNotice = viewModel::clearNotice,
+        onHome = { route = HOME },
+        onChat = { route = if (activeGroup == null) JOIN else CHAT },
+        onRecord = {
+            if (voice.recording) {
+                viewModel.stopVoiceNote(sendAfter = false)
+            } else when (recordIntent(groups.size)) {
+                RecordIntent.OpenQrJoin -> route = JOIN
+                RecordIntent.RecordVoice -> ensureMic { viewModel.startVoiceNote() }
+            }
+        },
+        onFind = { route = FIND },
+        onSos = { route = FEED },
+        sheet = if (showSheet) {
+            {
+                V16RecordSheet(
+                    groupName = activeGroup?.name ?: "Barkada",
+                    voice = voice,
+                    members = heard.size,
+                    onCancel = viewModel::cancelVoiceNote,
+                    onSend = viewModel::sendPendingVoice,
+                )
+            }
+        } else {
+            null
+        },
+    ) {
+        when (route) {
+            CHAT -> V16Chat(
                 group = activeGroup,
                 notes = groupNotes,
-                voice = voice,
-                notice = notice,
+                displayName = displayName,
+                memberCount = heard.size,
                 onSend = viewModel::sendGroupText,
+                onPlay = viewModel::playNote,
                 onSendToMedics = viewModel::sendNoteToMedics,
-                onOpenHome = { route = HOME },
-                onOpenSos = { route = RECORD },
-                onDismissNotice = viewModel::clearNotice,
             )
-        } else if (route == RECORD) {
-            SosScreen(
-                state = sos,
-                peers = peers,
-                location = location,
-                lastAlert = if (sos.actionable) null else lastAlert,
-                lastAlertLocal = lastAlert?.let { viewModel.isLocalOrigin(it.id) } == true,
-                clipReady = viewModel::clipReady,
-                onHoldStart = {
-                    if (hasPermission(context, Manifest.permission.RECORD_AUDIO)) {
-                        micGranted = true
-                        micBlocked = false
-                        viewModel.startRecording()
-                    } else if (micIsPermanentlyDenied(context)) {
-                        askedMic = true
-                        micBlocked = true
-                    } else {
-                        permissions.launch(requiredPermissions())
-                    }
+            JOIN -> V16Join(
+                group = activeGroup,
+                memberCount = heard.size,
+                displayName = displayName,
+                onDisplayName = { name ->
+                    displayName = name
+                    viewModel.setDisplayName(name)
                 },
+                onCreate = { name -> viewModel.createGroup(name) },
+                onScan = { scanQr() },
+            )
+            FIND -> V16Find(
+                sightings = heard,
+                displayName = displayName,
+                onPing = viewModel::pingGroup,
+                onRefresh = viewModel::refreshGroups,
+            )
+            FEED -> V16Sos(
+                sos = sos,
+                alerts = alerts,
+                onHoldStart = { ensureMic { viewModel.startRecording() } },
                 onHoldEnd = { if (sos.recording) viewModel.stopRecording() },
                 onHoldCancel = { if (sos.recording) viewModel.cancelRecording() },
                 onUndo = viewModel::undoCancel,
-                onTranscript = viewModel::onTranscriptChange,
-                onSend = viewModel::sendDraft,
+                onSendDraft = viewModel::sendDraft,
                 onDiscard = viewModel::discardDraft,
                 onPlay = viewModel::playClip,
-                onOpenSettings = { settingsOpen = true },
-                onOpenAlerts = { route = FEED },
-                micBlocked = micBlocked,
-                micGranted = micGranted,
-                locationWarning = locationWarning,
-                onOpenAppSettings = { openAppSettings(context) },
-            )
-        } else if (route == FEED) {
-            ResponderScreen(
-                alerts = alerts,
-                notice = notice,
+                onRespond = viewModel::markResponding,
                 clipReady = viewModel::clipReady,
-                onScan = {
-                    if (hasPermission(context, Manifest.permission.CAMERA)) {
-                        scanner.launch(scanOptions())
-                    } else {
-                        permissions.launch(requiredPermissions())
-                    }
-                },
-                onDelete = viewModel::removeAlert,
-                onShowQr = { qrAlert = it },
-                onPlay = viewModel::playClip,
-                onDismissNotice = viewModel::clearNotice,
-                onMarkResponding = viewModel::markResponding,
             )
-        } else {
-            GroupHomeScreen(
-                groups = groups,
-                active = activeGroup,
+            else -> V16Home(
+                displayName = displayName,
+                group = activeGroup,
+                notes = groupNotes,
                 sightings = sightings,
-                displayName = viewModel.displayName(),
-                notice = notice,
-                onDisplayName = viewModel::setDisplayName,
-                onCreate = { name ->
-                    val payload = viewModel.createGroup(name)
-                    if (payload != null) groupQr = name.trim() to payload
-                },
-                onSelect = viewModel::selectGroup,
-                onScan = {
-                    if (hasPermission(context, Manifest.permission.CAMERA)) {
-                        scanner.launch(scanOptions())
-                    } else {
-                        permissions.launch(requiredPermissions())
-                    }
-                },
-                onOpenChat = { route = CHAT },
-                onOpenSos = { route = RECORD },
-                onDismissNotice = viewModel::clearNotice,
+                onOpenChat = { route = if (activeGroup == null) JOIN else CHAT },
+                onOpenJoin = { route = JOIN },
+                onOpenFind = { route = FIND },
+                onPing = viewModel::pingGroup,
+                onOpenSos = { route = FEED },
+                onPlay = viewModel::playNote,
+                onSettings = { settingsOpen = true },
             )
         }
-        BottomSwitcher(
-            route = if (route == HOME || route == CHAT) RECORD else route,
-            alertBadge = unrespondedCritical,
-            onRecord = {
-                when (recordIntent(groups.size)) {
-                    RecordIntent.OpenQrJoin -> route = HOME
-                    RecordIntent.RecordVoice -> {
-                        if (route != CHAT) {
-                            route = CHAT
-                        } else if (voice.recording) {
-                            viewModel.stopVoiceNote()
-                        } else if (hasPermission(context, Manifest.permission.RECORD_AUDIO)) {
-                            micGranted = true
-                            micBlocked = false
-                            viewModel.startVoiceNote()
-                        } else if (micIsPermanentlyDenied(context)) {
-                            askedMic = true
-                            micBlocked = true
-                        } else {
-                            permissions.launch(requiredPermissions())
-                        }
-                    }
-                }
-            },
-            onAsk = { route = ASK },
-            onFeed = { route = FEED },
-            modifier = Modifier.align(Alignment.BottomCenter),
-        )
+        if (micBlocked) {
+            TextButton(onClick = { openAppSettings(context) }) {
+                Text("Microphone is off. Open settings.", color = Ink)
+            }
+        }
+        locationWarning?.let {
+            Text(it, color = Ink, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+        }
     }
 
     if (settingsOpen) {
@@ -290,37 +276,6 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                 settingsOpen = false
             },
         )
-    }
-    qrAlert?.let { alert ->
-        QrDialog(alert = alert, payload = viewModel.qrText(alert), onDismiss = { qrAlert = null })
-    }
-    groupQr?.let { (name, payload) ->
-        GroupQrDialog(name = name, payload = payload, onDismiss = { groupQr = null })
-    }
-}
-
-@Composable
-private fun QrDialog(alert: Alert, payload: String, onDismiss: () -> Unit) {
-    Dialog(onDismissRequest = onDismiss) {
-        Column(
-            modifier = Modifier
-                .clip(RoundedCornerShape(28.dp))
-                .background(Color.White)
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(alert.summary, color = Ink, fontWeight = FontWeight.Bold, fontSize = 21.sp)
-            Image(
-                bitmap = qrBitmap(payload).asImageBitmap(),
-                contentDescription = "Alert QR code",
-                modifier = Modifier
-                    .padding(vertical = 12.dp)
-                    .size(240.dp),
-            )
-            TextButton(onClick = onDismiss) {
-                Text("Close", color = Ink)
-            }
-        }
     }
 }
 

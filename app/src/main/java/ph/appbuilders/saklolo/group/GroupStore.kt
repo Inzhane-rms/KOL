@@ -1,6 +1,7 @@
 package ph.appbuilders.saklolo.group
 
 import ph.appbuilders.saklolo.relay.RelayPolicy
+import ph.appbuilders.saklolo.triage.Urgency
 
 data class GroupSnapshot(
     val groups: List<ConcertGroup> = emptyList(),
@@ -61,13 +62,16 @@ class GroupStore(private val persistence: GroupPersistence) {
     }
 
     /** Same id joins once. A second group with the same display name is a different id. */
-    fun join(id: String, name: String, at: Long): ConcertGroup = synchronized(this) {
+    fun join(id: String, name: String, at: Long, createdHere: Boolean = false): ConcertGroup = synchronized(this) {
         val trimmed = name.trim()
         val existing = groups[id]
         val stored = if (existing == null) {
-            ConcertGroup(id, trimmed, at)
+            ConcertGroup(id, trimmed, at, createdHere)
         } else {
-            existing.copy(name = trimmed.ifBlank { existing.name })
+            existing.copy(
+                name = trimmed.ifBlank { existing.name },
+                createdHere = existing.createdHere || createdHere,
+            )
         }
         groups[id] = stored
         activeId = id
@@ -78,7 +82,7 @@ class GroupStore(private val persistence: GroupPersistence) {
     fun addLocal(note: GroupNote) = synchronized(this) {
         val stored = note.copy(
             hops = 0,
-            urgency = note.urgency ?: GroupTriage.label(note.body),
+            urgency = labeled(note),
         )
         notes[stored.id] = stored
         localOriginIds += stored.id
@@ -100,7 +104,7 @@ class GroupStore(private val persistence: GroupPersistence) {
             val stored = note.copy(
                 hops = hop,
                 audioPath = null,
-                urgency = note.urgency ?: GroupTriage.label(note.body),
+                urgency = labeled(note),
             )
             notes[stored.id] = stored
             lastSeen.observe(stored, receivedAtMillis)
@@ -134,6 +138,11 @@ class GroupStore(private val persistence: GroupPersistence) {
     /** Notes this phone should forward, including groups it has not joined. */
     fun relayable(): List<GroupNote> = synchronized(this) {
         notes.values.filter { it.hops < RelayPolicy.MAX_HOPS }
+    }
+
+    private fun labeled(note: GroupNote): Urgency? {
+        if (note.kind == "ping") return null
+        return note.urgency ?: GroupTriage.label(note.body)
     }
 
     private fun persist() {

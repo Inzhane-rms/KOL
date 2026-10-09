@@ -11,6 +11,7 @@ data class ConcertGroup(
     val id: String,
     val name: String,
     val joinedAtMillis: Long,
+    val createdHere: Boolean = false,
 )
 
 data class GroupNote(
@@ -24,6 +25,8 @@ data class GroupNote(
     val lat: Double? = null,
     val lon: Double? = null,
     val urgency: Urgency? = null,
+    /** "text", "voice", or "ping". Ping is a presence note, not an alert. */
+    val kind: String = "text",
 )
 
 data class Sighting(
@@ -185,6 +188,7 @@ fun WireNote.toGroupNote(): GroupNote = GroupNote(
     hops = hops,
     lat = lat,
     lon = lon,
+    kind = kind,
 )
 
 fun GroupNote.toWire(): WireNote = WireNote(
@@ -196,4 +200,5 @@ fun GroupNote.toWire(): WireNote = WireNote(
     hops = hops,
     lat = lat,
     lon = lon,
+    kind = kind,
 )

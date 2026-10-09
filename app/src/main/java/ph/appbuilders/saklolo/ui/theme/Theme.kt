@@ -6,33 +6,49 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import ph.appbuilders.saklolo.R
 import ph.appbuilders.saklolo.triage.Urgency
 
-val Page = Color(0xFFEDEFF4)
-val Ink = Color(0xFF1F2433)
-/** v14 muted body text. */
-val InkSoft = Color(0xFF6B7180)
-val NavMuted = Color(0xFF9AA0AE)
-val Accent = Color(0xFFE3242B)
-/** Darkened red for text on the light-red card. #E3242B on #FDE8E8 is under 4.5. */
-val AccentDeep = Color(0xFFB5161C)
-val LightRed = Color(0xFFFDE8E8)
-val StatusGreen = Color(0xFF059669)
-/** Darkened from #059669 so green words pass 4.5:1 on white. The status dot stays StatusGreen. */
-val GreenText = Color(0xFF047857)
+val Page = Color(0xFFF7F5FF)
+val CardWhite = Color(0xFFFFFFFF)
+val Ink = Color(0xFF1E1B2E)
+val InkSoft = Color(0xFF6B6585)
+val NavMuted = InkSoft
+val Hairline = Color(0xFFECE8F7)
+
+val Violet = Color(0xFF7C5CFA)
+val VioletLight = Color(0xFFEEE9FF)
+val VioletDeep = Color(0xFF5B3FD6)
+val VioletGradStart = Color(0xFF9479FF)
+
+val Cyan = Color(0xFF5CC8E0)
+val CyanLight = Color(0xFFE3F6FA)
+val CyanText = Color(0xFF2A9DB8)
+val OfflineCyan = Cyan
+
+val Peach = Color(0xFFFFB48A)
+val PeachLight = Color(0xFFFFF0E6)
+val PeachText = Color(0xFFE07A45)
+
+/** Emergencies only. */
+val Accent = Color(0xFFEF4444)
+val AccentDeep = Color(0xFFB91C1C)
+val LightRed = Color(0xFFFDECEC)
+
+val StatusGreen = Color(0xFF22C55E)
+val GreenText = Color(0xFF15803D)
 val Amber = Color(0xFFF59E0B)
-val SafeTint = Color(0xFF16A34A)
-val Hairline = Color(0xFFE3E6EC)
-val PillAmberBg = Color(0xFFFEF3C7)
-val PillAmberText = Color(0xFF92400E)
-val NearSecondary = Color(0xFFA6ABB8)
-/** Status pill only. The rest of the light v14 theme stays as it is. */
-val OfflineCyan = Color(0xFF22D3EE)
-val ShadowInk = Color(0xFF5A6075)
-val ChipWash = Color(0xFFF1F2F6)
-val PlayerWash = Color(0xFFF4F5F8)
+val SafeTint = StatusGreen
+val PillAmberBg = Color(0xFFFEF3DC)
+val PillAmberText = Color(0xFFB45309)
+val NearSecondary = InkSoft
+val ShadowInk = Violet
+val ChipWash = VioletLight
+val PlayerWash = Page
 
 val CriticalRed = Accent
 val ForestMid = Color(0xFF065F46)
@@ -44,21 +60,37 @@ val HelpAmber = Amber
 val HelpInk = Ink
 val RingPink = LightRed
 
+val Poppins = FontFamily(
+    Font(R.font.poppins_regular, FontWeight.Normal),
+    Font(R.font.poppins_semibold, FontWeight.Medium),
+    Font(R.font.poppins_semibold, FontWeight.SemiBold),
+    Font(R.font.poppins_semibold, FontWeight.Bold),
+)
+
 private val Colors = lightColorScheme(
-    primary = Accent,
+    primary = Violet,
     onPrimary = Color.White,
     background = Page,
     onBackground = Ink,
-    surface = Color.White,
+    surface = CardWhite,
     onSurface = Ink,
     onSurfaceVariant = InkSoft,
 )
 
+private fun style(size: Int, weight: FontWeight, line: Int) = TextStyle(
+    fontFamily = Poppins,
+    fontWeight = weight,
+    fontSize = size.sp,
+    lineHeight = line.sp,
+    color = Ink,
+)
+
 private val Type = Typography(
-    bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 22.sp, color = Ink),
-    titleLarge = TextStyle(fontSize = 26.sp, lineHeight = 32.sp, fontWeight = FontWeight.Bold),
-    titleMedium = TextStyle(fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.Bold),
-    labelLarge = TextStyle(fontSize = 13.sp, lineHeight = 16.sp, fontWeight = FontWeight.Bold),
+    bodyLarge = style(16, FontWeight.Normal, 22),
+    bodyMedium = style(14, FontWeight.Normal, 20),
+    titleLarge = style(26, FontWeight.SemiBold, 32),
+    titleMedium = style(18, FontWeight.SemiBold, 24),
+    labelLarge = style(13, FontWeight.SemiBold, 16),
 )
 
 @Composable

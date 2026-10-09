@@ -41,6 +41,7 @@ data class WireNote(
     val hops: Int = 0,
     val lat: Double? = null,
     val lon: Double? = null,
+    val kind: String = "text",
 )
 
 @Serializable

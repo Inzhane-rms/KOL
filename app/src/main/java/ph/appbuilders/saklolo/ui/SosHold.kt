@@ -18,6 +18,21 @@ internal const val CANCEL_UNDO_MS = 5_000L
  */
 internal enum class SosHoldEnd { Continue, Release, Cancel }
 
+/** How far the finger is outside a wide button, in px. Zero while it stays on the button. */
+internal fun distanceOutsideRect(x: Float, y: Float, width: Float, height: Float): Float {
+    val dx = when {
+        x < 0f -> -x
+        x > width -> x - width
+        else -> 0f
+    }
+    val dy = when {
+        y < 0f -> -y
+        y > height -> y - height
+        else -> 0f
+    }
+    return sqrt(dx * dx + dy * dy)
+}
+
 internal fun distancePastButtonEdge(x: Float, y: Float, sizePx: Float): Float {
     val center = sizePx / 2f
     val dx = x - center

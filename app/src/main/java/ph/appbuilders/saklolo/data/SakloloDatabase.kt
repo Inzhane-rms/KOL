@@ -63,6 +63,7 @@ data class GroupEntity(
     val name: String,
     val joinedAtMillis: Long,
     val active: Boolean,
+    val createdHere: Boolean = false,
 )
 
 @Entity(tableName = "group_notes")
@@ -78,6 +79,7 @@ data class NoteEntity(
     val lon: Double?,
     val urgency: String?,
     val localOrigin: Boolean,
+    val kind: String = "text",
 )
 
 @Entity(tableName = "last_seen")
@@ -132,7 +134,7 @@ interface GroupDao {
 
 @Database(
     entities = [AlertEntity::class, GroupEntity::class, NoteEntity::class, SightingEntity::class],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 abstract class SakloloDatabase : RoomDatabase() {
@@ -143,6 +145,13 @@ abstract class SakloloDatabase : RoomDatabase() {
 val MIGRATION_1_2 = object : Migration(1, 2) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE alerts ADD COLUMN responding INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE concert_groups ADD COLUMN createdHere INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE group_notes ADD COLUMN kind TEXT NOT NULL DEFAULT 'text'")
     }
 }
 
@@ -172,7 +181,7 @@ class RoomGroupPersistence(private val database: SakloloDatabase) : GroupPersist
         val groups = dao.groups()
         val notes = dao.notes()
         return GroupSnapshot(
-            groups = groups.map { ConcertGroup(it.id, it.name, it.joinedAtMillis) },
+            groups = groups.map { ConcertGroup(it.id, it.name, it.joinedAtMillis, it.createdHere) },
             notes = notes.map { it.toNote() },
             sightings = dao.sightings().map { it.toSighting() },
             localOriginIds = notes.filter { it.localOrigin }.map { it.id },
@@ -183,7 +192,7 @@ class RoomGroupPersistence(private val database: SakloloDatabase) : GroupPersist
     override fun save(snapshot: GroupSnapshot) {
         database.groups().replaceAll(
             snapshot.groups.map {
-                GroupEntity(it.id, it.name, it.joinedAtMillis, it.id == snapshot.activeId)
+                GroupEntity(it.id, it.name, it.joinedAtMillis, it.id == snapshot.activeId, it.createdHere)
             },
             snapshot.notes.map { it.toEntity(it.id in snapshot.localOriginIds.toSet()) },
             snapshot.sightings.map {
@@ -211,6 +220,7 @@ private fun NoteEntity.toNote() = GroupNote(
     lat = lat,
     lon = lon,
     urgency = urgency?.let { runCatching { Urgency.valueOf(it) }.getOrNull() },
+    kind = kind,
 )
 
 private fun GroupNote.toEntity(localOrigin: Boolean) = NoteEntity(
@@ -225,6 +235,7 @@ private fun GroupNote.toEntity(localOrigin: Boolean) = NoteEntity(
     lon = lon,
     urgency = urgency?.name,
     localOrigin = localOrigin,
+    kind = kind,
 )
 
 private fun SightingEntity.toSighting() = Sighting(groupId, name, heardAtMillis, lat, lon)

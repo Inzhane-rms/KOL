@@ -61,7 +61,9 @@ data class SosUiState(
 data class VoiceUiState(
     val recording: Boolean = false,
     val elapsedSec: Int = 0,
+    val micLevel: Float = 0f,
     val status: String = "",
+    val transcript: String = "",
 )
 
 data class DemoConfig(
@@ -97,6 +99,10 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _voice = MutableStateFlow(VoiceUiState())
     val voice: StateFlow<VoiceUiState> = _voice.asStateFlow()
+    private var pendingVoice: GroupNote? = null
+    private var sendVoiceWhenReady = false
+    private val _chatRead = MutableStateFlow(runtime.settings.lastChatReadMillis)
+    val chatReadMillis: StateFlow<Long> = _chatRead.asStateFlow()
 
     private val _askTurns = MutableStateFlow<List<AskTurn>>(emptyList())
     val askTurns: StateFlow<List<AskTurn>> = _askTurns.asStateFlow()
@@ -487,7 +493,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         val trimmed = name.trim()
         if (trimmed.isEmpty()) return null
         val id = GroupQr.newId()
-        runtime.groupStore.join(id, trimmed, System.currentTimeMillis())
+        runtime.groupStore.join(id, trimmed, System.currentTimeMillis(), createdHere = true)
         runtime.refreshGroups()
         return GroupQr.encode(id, trimmed)
     }
@@ -511,6 +517,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
             lat = location?.first,
             lon = location?.second,
             urgency = GroupTriage.label(trimmed),
+            kind = "text",
         )
         runtime.groupStore.addLocal(note)
         runtime.relay.broadcastNote(note)
@@ -534,30 +541,35 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         recordingStartedAt = System.currentTimeMillis()
         recordGeneration += 1
         val generation = recordGeneration
-        _voice.update { it.copy(recording = true, elapsedSec = 0, status = "Listening…") }
+        _voice.update { it.copy(recording = true, elapsedSec = 0, micLevel = 0f, status = "", transcript = "") }
         viewModelScope.launch {
             while (recorder.isRunning && _voice.value.recording && generation == recordGeneration) {
                 delay(250)
                 if (generation != recordGeneration) return@launch
                 val elapsed = ((System.currentTimeMillis() - recordingStartedAt) / 1000).toInt()
-                _voice.update { it.copy(elapsedSec = elapsed) }
+                _voice.update { it.copy(elapsedSec = elapsed, micLevel = recorder.recentPeak()) }
                 if (generation == recordGeneration && (elapsed >= PcmRecorder.MAX_SECONDS || !recorder.isRunning)) {
-                    stopVoiceNote()
+                    stopVoiceNote(sendAfter = false)
                     break
                 }
             }
         }
     }
 
-    fun stopVoiceNote() {
+    fun stopVoiceNote(sendAfter: Boolean = false) {
+        if (sendAfter) sendVoiceWhenReady = true
         viewModelScope.launch {
             if (!recordGate.tryLock()) return@launch
             try {
-                if (!_voice.value.recording && !recorder.isRunning) return@launch
+                if (!_voice.value.recording && !recorder.isRunning) {
+                    if (sendVoiceWhenReady) commitPendingVoice()
+                    return@launch
+                }
                 runtime.relay.onLocalRecordingFinished()
-                _voice.update { it.copy(recording = false, status = "Transcribing on this phone…") }
+                _voice.update { it.copy(recording = false, status = "Transcribing…", transcript = "") }
                 finishVoice(recorder.stop())
             } catch (error: Exception) {
+                sendVoiceWhenReady = false
                 _voice.update { it.copy(recording = false, status = error.message ?: "Transcription failed") }
             } finally {
                 recordGate.unlock()
@@ -565,23 +577,106 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun sendPendingVoice() {
+        if (_voice.value.recording || recorder.isRunning) {
+            stopVoiceNote(sendAfter = true)
+            return
+        }
+        if (_voice.value.status == "Transcribing…") {
+            sendVoiceWhenReady = true
+            return
+        }
+        commitPendingVoice()
+    }
+
+    fun cancelVoiceNote() {
+        sendVoiceWhenReady = false
+        pendingVoice = null
+        recordGeneration += 1
+        viewModelScope.launch {
+            if (!recordGate.tryLock()) return@launch
+            try {
+                if (recorder.isRunning) {
+                    runtime.relay.onLocalRecordingFinished()
+                    recorder.stop()
+                }
+            } finally {
+                recordGate.unlock()
+                _voice.value = VoiceUiState()
+            }
+        }
+    }
+
+    fun markChatRead() {
+        val now = System.currentTimeMillis()
+        runtime.settings.lastChatReadMillis = now
+        _chatRead.value = now
+    }
+
+    fun refreshGroups() {
+        runtime.refreshGroups()
+    }
+
+    fun pingGroup() {
+        val group = runtime.groupStore.active() ?: return
+        val location = DeviceLocation.lastKnown(getApplication())
+        val note = GroupNote(
+            id = java.util.UUID.randomUUID().toString(),
+            groupId = group.id,
+            sender = runtime.settings.displayName,
+            body = "Ping",
+            createdAtMillis = System.currentTimeMillis(),
+            lat = location?.first,
+            lon = location?.second,
+            kind = "ping",
+        )
+        runtime.groupStore.addLocal(note)
+        runtime.relay.broadcastNote(note)
+        runtime.refreshGroups()
+    }
+
+    fun playNote(path: String?) {
+        val file = path?.let { File(it) }
+        if (file == null || !file.exists()) return
+        try {
+            player?.release()
+            player = MediaPlayer().apply {
+                setDataSource(file.absolutePath)
+                setOnCompletionListener {
+                    it.release()
+                    if (player === it) player = null
+                }
+                prepare()
+                start()
+            }
+        } catch (_: Exception) {
+        }
+    }
+
     private suspend fun finishVoice(pcm: FloatArray) {
         if (pcm.size < PcmRecorder.SAMPLE_RATE / 2) {
-            _voice.update { it.copy(status = "Recording was too short") }
+            sendVoiceWhenReady = false
+            _voice.update { it.copy(recording = false, status = "Recording was too short", transcript = "") }
             return
         }
         val engine = transcriber ?: run {
-            _voice.update { it.copy(status = "The speech model is not ready yet.") }
+            sendVoiceWhenReady = false
+            _voice.update { it.copy(recording = false, status = "The speech model is not ready yet.", transcript = "") }
             return
         }
+        _voice.update { it.copy(recording = false, status = "Transcribing…", transcript = "") }
         val text = withContext(Dispatchers.Default) {
             engine.transcribe(pcm, _sos.value.language.whisperCode)
         }
         if (text.isBlank()) {
-            _voice.update { it.copy(status = "No speech recognized") }
+            sendVoiceWhenReady = false
+            _voice.update { it.copy(status = "No speech recognized", transcript = "") }
             return
         }
-        val group = runtime.groupStore.active() ?: return
+        val group = runtime.groupStore.active() ?: run {
+            sendVoiceWhenReady = false
+            return
+        }
         val location = DeviceLocation.lastKnown(getApplication())
         val id = java.util.UUID.randomUUID().toString()
         val audioPath = run {
@@ -589,7 +684,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
             WavPcm.write(file, pcm)
             if (file.exists() && file.length() > WavPcm.HEADER_BYTES) file.absolutePath else null
         }
-        val note = GroupNote(
+        pendingVoice = GroupNote(
             id = id,
             groupId = group.id,
             sender = runtime.settings.displayName,
@@ -599,11 +694,22 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
             lat = location?.first,
             lon = location?.second,
             urgency = GroupTriage.labelVoice(text),
+            kind = "voice",
         )
+        _voice.update { it.copy(recording = false, status = "", transcript = pendingVoice?.body.orEmpty()) }
+        if (sendVoiceWhenReady) {
+            sendVoiceWhenReady = false
+            commitPendingVoice()
+        }
+    }
+
+    private fun commitPendingVoice() {
+        val note = pendingVoice ?: return
+        pendingVoice = null
         runtime.groupStore.addLocal(note)
         runtime.relay.broadcastNote(note)
         runtime.refreshGroups()
-        _voice.update { it.copy(status = "Voice note sent") }
+        _voice.value = VoiceUiState()
     }
 
     fun sendNoteToMedics(noteId: String) {
