@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -71,7 +72,6 @@ fun ResponderScreen(
     onPlay: (Alert) -> Unit,
     onDismissNotice: () -> Unit,
     onMarkResponding: (String) -> Unit,
-    onOpenRecorder: () -> Unit,
 ) {
     var filterName by rememberSaveable { mutableStateOf(FeedFilter.ALL.name) }
     val filter = runCatching { FeedFilter.valueOf(filterName) }.getOrDefault(FeedFilter.ALL)
@@ -94,36 +94,19 @@ fun ResponderScreen(
             .statusBarsPadding()
             .padding(horizontal = 20.dp)
             .navigationBarsPadding()
-            .padding(bottom = 108.dp),
+            .padding(bottom = 150.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Alerts", color = Ink, fontSize = 26.sp, fontWeight = FontWeight.Bold)
-                Text(
-                    "${alerts.size} on this phone · sorted by urgency",
-                    color = InkSoft,
-                    fontSize = 13.sp,
-                )
-            }
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .softCard(CircleShape)
-                    .clickable(onClick = onScan),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Filled.Tune, contentDescription = "Scan QR", tint = Ink)
-            }
+        Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+            Text("Alerts", color = Ink, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+            Text(
+                "${alerts.size} near you · sorted by urgency",
+                color = InkSoft,
+                fontSize = 14.sp,
+            )
         }
-        Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            FilterChip("All ${alerts.size}", filter == FeedFilter.ALL) { filterName = FeedFilter.ALL.name }
-            FilterChip("Critical $criticalCount", filter == FeedFilter.CRITICAL) { filterName = FeedFilter.CRITICAL.name }
-            FilterChip("Help $helpCount", filter == FeedFilter.HELP) { filterName = FeedFilter.HELP.name }
-            FilterChip("Safe $safeCount", filter == FeedFilter.SAFE) { filterName = FeedFilter.SAFE.name }
+        nearest?.let { alert ->
+            NearestCritical(alert)
         }
         notice?.let { message ->
             Text(
@@ -175,8 +158,15 @@ fun ResponderScreen(
                 modifier = Modifier.fillMaxWidth(),
             )
         }
-        nearest?.let { alert ->
-            NearestCritical(alert, onOpenRecorder)
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            FilterChip("All ${alerts.size}", filter == FeedFilter.ALL) { filterName = FeedFilter.ALL.name }
+            FilterChip("Critical $criticalCount", filter == FeedFilter.CRITICAL) { filterName = FeedFilter.CRITICAL.name }
+            FilterChip("Help $helpCount", filter == FeedFilter.HELP) { filterName = FeedFilter.HELP.name }
+            FilterChip("Safe $safeCount", filter == FeedFilter.SAFE) { filterName = FeedFilter.SAFE.name }
+            FilterChip("Scan", false, onScan)
         }
     }
 }
@@ -185,12 +175,12 @@ fun ResponderScreen(
 private fun FilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
     Box(
         modifier = Modifier
-            .height(36.dp)
-            .then(if (selected) Modifier else Modifier.softCard(RoundedCornerShape(18.dp)))
-            .clip(RoundedCornerShape(18.dp))
+            .height(48.dp)
+            .then(if (selected) Modifier else Modifier.softCard(RoundedCornerShape(24.dp)))
+            .clip(RoundedCornerShape(24.dp))
             .background(if (selected) Accent else Color.White)
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp),
+            .padding(horizontal = 16.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(label, color = if (selected) Color.White else Ink, fontSize = 12.sp, fontWeight = FontWeight.Bold)
@@ -206,31 +196,29 @@ private fun FeaturedAlert(
     onShowQr: () -> Unit,
     onRespond: () -> Unit,
 ) {
-    var open by rememberSaveable(alert.id) { mutableStateOf(false) }
+    var open by rememberSaveable(alert.id) { mutableStateOf(true) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .softCard(RoundedCornerShape(28.dp))
             .border(1.5.dp, Accent, RoundedCornerShape(28.dp))
-            .padding(16.dp),
+            .padding(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         AlertHeader(alert, open, { open = !open })
         if (canPlay) ClipPlayer(alert, onPlay)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            SourceChip(alert.summarySource)
-            if (!alert.responding) {
-                Text(
-                    "Mark responding",
-                    color = Color.White,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(Accent)
-                        .clickable(onClick = onRespond)
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                )
+        SourceChip(alert.summarySource)
+        if (!alert.responding) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(Accent)
+                    .clickable(onClick = onRespond),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("Mark responding", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             }
         }
         if (open) TranscriptBlock(alert, canPlay, onPlay, onShowQr, onDelete)
@@ -285,8 +273,9 @@ private fun CompactAlert(
     Column(
         Modifier
             .fillMaxWidth()
+            .heightIn(min = 72.dp)
             .softCard()
-            .padding(horizontal = 12.dp, vertical = 12.dp),
+            .padding(horizontal = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         AlertHeader(alert, open, { open = !open })
@@ -392,34 +381,24 @@ private fun SourceChip(source: String) {
 }
 
 @Composable
-private fun NearestCritical(alert: Alert, onOpenRecorder: () -> Unit) {
-    Row(
+private fun NearestCritical(alert: Alert) {
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(28.dp))
+            .height(56.dp)
+            .clip(RoundedCornerShape(20.dp))
             .background(Ink)
-            .padding(20.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.Center,
     ) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("NEAREST CRITICAL", color = NearSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            Text(alert.summary, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 2)
-            Text(
-                "${formatGps(alert.lat, alert.lon)} · ${formatHops(alert.hops)}",
-                color = NearSecondary,
-                fontSize = 12.sp,
-            )
-        }
-        Box(
-            modifier = Modifier
-                .size(60.dp)
-                .clip(CircleShape)
-                .background(Brush.radialGradient(listOf(Color(0xFFFF4B4B), Accent, Color(0xFFB5161C))))
-                .clickable(onClick = onOpenRecorder),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text("SOS", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-        }
+        Text("NEAREST CRITICAL", color = NearSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        Text(
+            "${formatGps(alert.lat, alert.lon)} · ${formatHops(alert.hops)}",
+            color = Color.White,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+        )
     }
 }
 

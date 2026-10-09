@@ -9,6 +9,9 @@ import org.junit.Test
 import ph.appbuilders.saklolo.ask.AskEngine
 import ph.appbuilders.saklolo.ask.AskResult
 import ph.appbuilders.saklolo.ask.SafetyBank
+import ph.appbuilders.saklolo.ui.chipQuestion
+import ph.appbuilders.saklolo.ui.realSourceLine
+import ph.appbuilders.saklolo.ui.showNearestTipLabel
 
 class AskEngineTest {
     private val bank: SafetyBank = AskEngine.parse(bundledJson())
@@ -136,7 +139,44 @@ class AskEngineTest {
             assertFalse(AskEngine.tokens(suggestion.question).contains("gas"))
             val answered = AskEngine.answer(suggestion.question, bank) as AskResult.Tip
             assertEquals(suggestion.question, answered.askedLabel)
+            assertEquals(suggestion.question, chipQuestion(suggestion))
+            assertFalse(showNearestTipLabel(answered.fromModel))
         }
+    }
+
+    @Test
+    fun nearestTipLabelIsOnlyForModelFallbacks() {
+        val keyword = AskEngine.answer("pwede ba tumawid sa baha?", bank) as AskResult.Tip
+        assertFalse(keyword.fromModel)
+        assertFalse(showNearestTipLabel(keyword.fromModel))
+        val picked = keyword.copy(fromModel = true)
+        assertTrue(showNearestTipLabel(picked.fromModel))
+        assertTrue(AskEngine.answer("May amoy ng gas leak sa kusina.", bank) is AskResult.Fallback)
+        assertFalse(showNearestTipLabel(false))
+    }
+
+    @Test
+    fun chipsSendTheStoredQuestion() {
+        val suggestions = AskEngine.suggestions(bank)
+        assertEquals(bank.pairs.first { it.id == 4 }.questionTl, chipQuestion(suggestions[0]))
+        assertEquals(bank.pairs.first { it.id == 12 }.questionTl, chipQuestion(suggestions[1]))
+        assertEquals(bank.pairs.first { it.id == 8 }.questionTl, chipQuestion(suggestions[2]))
+        suggestions.forEach { suggestion ->
+            assertTrue(chipQuestion(suggestion).isNotEmpty())
+            assertFalse(chipQuestion(suggestion) == suggestion.label && suggestion.label == "Go-bag")
+        }
+    }
+
+    @Test
+    fun sourceLineUsesTheBankText() {
+        val handbook = bank.sources.getValue("H")
+        val line = realSourceLine(bank.sources, "H")
+        assertTrue(line.startsWith("Source: "))
+        assertTrue(line.contains(handbook))
+        assertFalse(line.contains("NDRRMC family preparedness guide"))
+        val both = realSourceLine(bank.sources, "H,U")
+        assertTrue(both.contains(bank.sources.getValue("H")))
+        assertTrue(both.contains(bank.sources.getValue("U")))
     }
 
     private fun bundledJson(): String {

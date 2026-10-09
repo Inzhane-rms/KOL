@@ -66,6 +66,8 @@ import ph.appbuilders.saklolo.stt.PcmRecorder
 import ph.appbuilders.saklolo.ui.theme.Accent
 import ph.appbuilders.saklolo.ui.theme.Ink
 import ph.appbuilders.saklolo.ui.theme.InkSoft
+import ph.appbuilders.saklolo.ui.theme.LightRed
+import ph.appbuilders.saklolo.ui.theme.NavMuted
 import ph.appbuilders.saklolo.ui.theme.ShadowInk
 
 private val CardShape = RoundedCornerShape(28.dp)
@@ -155,6 +157,7 @@ fun SosOrb(
     enabled: Boolean,
     onHoldStart: () -> Unit,
     onHoldEnd: () -> Unit,
+    onHoldCancel: () -> Unit,
     dimmed: Boolean = false,
 ) {
     var pressed by remember { mutableStateOf(false) }
@@ -162,6 +165,7 @@ fun SosOrb(
     val enabledNow by rememberUpdatedState(enabled)
     val startNow by rememberUpdatedState(onHoldStart)
     val endNow by rememberUpdatedState(onHoldEnd)
+    val cancelNow by rememberUpdatedState(onHoldCancel)
     val pressScale by animateFloatAsState(
         targetValue = if (pressed) 0.96f else 1f,
         animationSpec = tween(100),
@@ -182,9 +186,10 @@ fun SosOrb(
         label = "ring2",
     )
     val fraction = if (recording) elapsedSec / PcmRecorder.MAX_SECONDS.toFloat() else 0f
-    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(280.dp)) {
-        PulseDisc(ring1, 280.dp, 0.05f)
-        PulseDisc(ring2, 248.dp, 0.09f)
+    val pulse = if (recording) 0.10f to 0.16f else 0.05f to 0.09f
+    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(296.dp)) {
+        PulseDisc(ring1, 296.dp, pulse.first)
+        PulseDisc(ring2, 256.dp, pulse.second)
         Box(
             Modifier
                 .size(216.dp)
@@ -194,8 +199,17 @@ fun SosOrb(
         )
         Canvas(Modifier.size(216.dp)) {
             if (fraction <= 0f) return@Canvas
-            val stroke = 5.dp.toPx()
+            val stroke = 6.dp.toPx()
             val inset = stroke / 2f
+            drawArc(
+                color = Color(0xFFE3E6EC),
+                startAngle = -90f,
+                sweepAngle = 360f,
+                useCenter = false,
+                topLeft = Offset(inset, inset),
+                size = Size(size.width - stroke, size.height - stroke),
+                style = Stroke(width = stroke),
+            )
             drawArc(
                 color = Accent,
                 startAngle = -90f,
@@ -211,8 +225,8 @@ fun SosOrb(
                 size.width / 2f + (cos(angle) * radius).toFloat(),
                 size.height / 2f + (sin(angle) * radius).toFloat(),
             )
-            drawCircle(Color.White, 8.dp.toPx(), center)
-            drawCircle(Accent, 5.dp.toPx(), center)
+            drawCircle(Accent, 8.dp.toPx(), center)
+            drawCircle(Color.White, 5.dp.toPx(), center)
         }
         Box(
             modifier = Modifier
@@ -222,7 +236,11 @@ fun SosOrb(
                 .shadow(8.dp, CircleShape, ambientColor = ButtonShadow, spotColor = ButtonShadow)
                 .clip(CircleShape)
                 .background(
-                    Brush.radialGradient(listOf(Color(0xFFFF4B4B), Accent, Color(0xFFB5161C))),
+                    if (recording) {
+                        Brush.radialGradient(listOf(Color(0xFFF23A3A), Color(0xFFCF1D24), Color(0xFFA11218)))
+                    } else {
+                        Brush.radialGradient(listOf(Color(0xFFFF4B4B), Accent, Color(0xFFB5161C)))
+                    },
                 )
                 .pointerInput(Unit) {
                     awaitEachGesture {
@@ -233,57 +251,67 @@ fun SosOrb(
                         if (!recordingNow) startNow()
                         val width = size.width.toFloat()
                         val height = size.height.toFloat()
+                        var outcome = SosHoldEnd.Release
                         try {
                             while (true) {
                                 val event = awaitPointerEvent(PointerEventPass.Main)
                                 event.changes.forEach { it.consume() }
                                 val change = event.changes.firstOrNull { it.id == down.id }
-                                if (change == null) {
-                                    if (shouldEndSosHold(pointerPressed = true, outOfBounds = false, cancelled = true)) {
-                                        break
-                                    }
-                                    continue
+                                val decision = if (change == null) {
+                                    sosHoldEnd(pointerPressed = true, outOfBounds = false, cancelled = true)
+                                } else {
+                                    val outside = change.position.x < 0f ||
+                                        change.position.y < 0f ||
+                                        change.position.x > width ||
+                                        change.position.y > height
+                                    sosHoldEnd(change.pressed, outside, cancelled = false)
                                 }
-                                val outside = change.position.x < 0f ||
-                                    change.position.y < 0f ||
-                                    change.position.x > width ||
-                                    change.position.y > height
-                                if (shouldEndSosHold(change.pressed, outside, cancelled = false)) break
+                                if (decision != SosHoldEnd.Continue) {
+                                    outcome = decision
+                                    break
+                                }
                             }
                         } catch (cancelled: CancellationException) {
                             pressed = false
-                            if (shouldEndSosHold(pointerPressed = true, outOfBounds = false, cancelled = true)) {
-                                endNow()
-                            }
+                            cancelNow()
                             throw cancelled
                         }
                         pressed = false
-                        endNow()
+                        if (outcome == SosHoldEnd.Cancel) cancelNow() else endNow()
                     }
                 },
             contentAlignment = Alignment.Center,
         ) {
-            Canvas(Modifier.size(64.dp)) {
-                val c = Offset(size.width / 2f, size.height / 2f)
-                drawCircle(Color.White, 5.dp.toPx(), c)
-                drawArc(
-                    Color.White,
-                    startAngle = -60f,
-                    sweepAngle = 120f,
-                    useCenter = false,
-                    topLeft = Offset(c.x - 14.dp.toPx(), c.y - 14.dp.toPx()),
-                    size = Size(28.dp.toPx(), 28.dp.toPx()),
-                    style = Stroke(3.dp.toPx(), cap = StrokeCap.Round),
+            if (recording) {
+                Box(
+                    Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color.White),
                 )
-                drawArc(
-                    Color.White,
-                    startAngle = -50f,
-                    sweepAngle = 100f,
-                    useCenter = false,
-                    topLeft = Offset(c.x - 24.dp.toPx(), c.y - 24.dp.toPx()),
-                    size = Size(48.dp.toPx(), 48.dp.toPx()),
-                    style = Stroke(3.dp.toPx(), cap = StrokeCap.Round),
-                )
+            } else {
+                Canvas(Modifier.size(64.dp)) {
+                    val c = Offset(size.width / 2f, size.height / 2f)
+                    drawCircle(Color.White, 5.dp.toPx(), c)
+                    drawArc(
+                        Color.White,
+                        startAngle = -60f,
+                        sweepAngle = 120f,
+                        useCenter = false,
+                        topLeft = Offset(c.x - 14.dp.toPx(), c.y - 14.dp.toPx()),
+                        size = Size(28.dp.toPx(), 28.dp.toPx()),
+                        style = Stroke(3.dp.toPx(), cap = StrokeCap.Round),
+                    )
+                    drawArc(
+                        Color.White,
+                        startAngle = -50f,
+                        sweepAngle = 100f,
+                        useCenter = false,
+                        topLeft = Offset(c.x - 24.dp.toPx(), c.y - 24.dp.toPx()),
+                        size = Size(48.dp.toPx(), 48.dp.toPx()),
+                        style = Stroke(3.dp.toPx(), cap = StrokeCap.Round),
+                    )
+                }
             }
         }
     }
@@ -309,26 +337,67 @@ fun BottomSwitcher(
     onFeed: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(
-        modifier = modifier
+    Box(
+        modifier
             .navigationBarsPadding()
-            .padding(start = 20.dp, end = 20.dp, bottom = 16.dp)
+            .padding(horizontal = 20.dp)
+            .padding(bottom = 12.dp)
             .fillMaxWidth()
-            .height(68.dp)
-            .shadow(10.dp, RoundedCornerShape(34.dp), ambientColor = ShadowSpot, spotColor = ShadowSpot)
-            .clip(RoundedCornerShape(34.dp))
-            .background(Color.White)
-            .padding(8.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+            .height(116.dp),
     ) {
-        NavTab("Record", Icons.Filled.Mic, route == "record", 0, Modifier.weight(1f), onRecord)
-        NavTab("Alerts", Icons.Filled.Notifications, route == "feed", alertBadge, Modifier.weight(1f), onFeed)
-        NavTab("Ask", Icons.Filled.ChatBubble, route == "ask", 0, Modifier.weight(1f), onAsk)
+        Row(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(64.dp)
+                .shadow(6.dp, RoundedCornerShape(32.dp), ambientColor = ShadowSpot, spotColor = ShadowSpot)
+                .clip(RoundedCornerShape(32.dp))
+                .background(Color.White),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            NavSide("Alerts", Icons.Filled.Notifications, route == "feed", alertBadge, Modifier.weight(1f), onFeed)
+            Box(Modifier.size(width = 88.dp, height = 64.dp))
+            NavSide("Ask", Icons.Filled.ChatBubble, route == "ask", 0, Modifier.weight(1f), onAsk)
+        }
+        Column(
+            Modifier.align(Alignment.TopCenter),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(Modifier.size(88.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(88.dp).clip(CircleShape).background(Color.White))
+                if (route == "record") {
+                    Box(
+                        Modifier
+                            .size(80.dp)
+                            .clip(CircleShape)
+                            .background(Accent.copy(alpha = 0.35f)),
+                    )
+                }
+                Box(
+                    Modifier
+                        .size(72.dp)
+                        .shadow(6.dp, CircleShape, ambientColor = Accent.copy(alpha = 0.35f), spotColor = Accent.copy(alpha = 0.35f))
+                        .clip(CircleShape)
+                        .background(Brush.radialGradient(listOf(Color(0xFFFF4B4B), Accent, Color(0xFFB5161C))))
+                        .clickable(onClick = onRecord),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.Mic, contentDescription = "Record", tint = Color.White, modifier = Modifier.size(28.dp))
+                }
+            }
+        }
+        Text(
+            "Record",
+            color = if (route == "record") Accent else NavMuted,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp),
+        )
     }
 }
 
 @Composable
-private fun NavTab(
+private fun NavSide(
     label: String,
     icon: ImageVector,
     selected: Boolean,
@@ -336,40 +405,48 @@ private fun NavTab(
     modifier: Modifier,
     onClick: () -> Unit,
 ) {
-    val ink = if (selected) Color.White else InkSoft
-    Box(
-        modifier = modifier
-            .height(52.dp)
-            .clip(RoundedCornerShape(26.dp))
-            .background(if (selected) Accent else Color.Transparent)
+    val ink = if (selected) Accent else NavMuted
+    Column(
+        modifier
+            .fillMaxWidth()
+            .height(64.dp)
             .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Box {
-                Icon(icon, contentDescription = null, tint = ink, modifier = Modifier.size(18.dp))
-                if (badge > 0) {
-                    val count = if (badge > 9) "9+" else badge.toString()
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .offset(x = 8.dp, y = (-6).dp)
-                            .size(16.dp)
-                            .clip(CircleShape)
-                            .background(if (selected) Color.White else Accent),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            text = count,
-                            color = if (selected) Accent else Color.White,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
+        Box(contentAlignment = Alignment.Center) {
+            if (selected) {
+                Box(
+                    Modifier
+                        .size(width = 56.dp, height = 28.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(LightRed),
+                )
+            }
+            Icon(icon, contentDescription = null, tint = ink, modifier = Modifier.size(22.dp))
+            if (badge > 0) {
+                val count = if (badge > 9) "9+" else badge.toString()
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(x = 10.dp, y = (-6).dp)
+                        .size(16.dp)
+                        .clip(CircleShape)
+                        .background(Accent)
+                        .padding(1.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(count, color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                 }
             }
-            Text(label, color = ink, fontSize = 11.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
         }
+        Text(
+            label,
+            color = ink,
+            fontSize = 11.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+            modifier = Modifier.padding(top = 2.dp),
+        )
     }
 }
 
@@ -377,7 +454,7 @@ private fun NavTab(
 fun PlayButton(onClick: () -> Unit) {
     Box(
         modifier = Modifier
-            .size(28.dp)
+            .size(48.dp)
             .clip(CircleShape)
             .background(Accent)
             .clickable(onClick = onClick),

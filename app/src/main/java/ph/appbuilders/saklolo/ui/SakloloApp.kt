@@ -176,16 +176,12 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                     }
                 },
                 onHoldEnd = { if (sos.recording) viewModel.stopRecording() },
+                onHoldCancel = { if (sos.recording) viewModel.cancelRecording() },
                 onTranscript = viewModel::onTranscriptChange,
                 onSend = viewModel::sendDraft,
                 onDiscard = viewModel::discardDraft,
                 onPlay = viewModel::playClip,
                 onOpenSettings = { settingsOpen = true },
-                onSeeAll = { route = ASK },
-                onTopic = { question ->
-                    askSeed = question
-                    route = ASK
-                },
                 onOpenAlerts = { route = FEED },
                 micBlocked = micBlocked,
                 micGranted = micGranted,
@@ -209,7 +205,6 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                 onPlay = viewModel::playClip,
                 onDismissNotice = viewModel::clearNotice,
                 onMarkResponding = viewModel::markResponding,
-                onOpenRecorder = { route = RECORD },
             )
         }
         BottomSwitcher(

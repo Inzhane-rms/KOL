@@ -49,6 +49,7 @@ data class SosUiState(
     val sentAlertId: String? = null,
     val gemmaStatus: String = "",
     val gemmaLoading: Boolean = false,
+    val micLevel: Float = 0f,
 )
 
 data class DemoConfig(
@@ -69,6 +70,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     private var recordingStartedAt = 0L
     private var lastPcm: FloatArray? = null
     private var draftGeneration = 0
+    private var recordGeneration = 0
     private var player: MediaPlayer? = null
 
     val alerts: StateFlow<List<Alert>> = runtime.alerts
@@ -202,24 +204,53 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         recordingStartedAt = System.currentTimeMillis()
+        recordGeneration += 1
+        val generation = recordGeneration
         _sos.update {
             it.copy(
                 recording = true,
                 elapsedSec = 0,
+                micLevel = 0f,
                 error = null,
                 sentAlertId = null,
                 status = "Listening… speak the SOS",
             )
         }
         viewModelScope.launch {
-            while (recorder.isRunning && _sos.value.recording) {
+            while (recorder.isRunning && _sos.value.recording && generation == recordGeneration) {
                 delay(250)
+                if (generation != recordGeneration) return@launch
                 val elapsed = ((System.currentTimeMillis() - recordingStartedAt) / 1000).toInt()
-                _sos.update { state -> state.copy(elapsedSec = elapsed) }
-                if (elapsed >= PcmRecorder.MAX_SECONDS || !recorder.isRunning) {
+                val level = recorder.recentPeak()
+                _sos.update { state -> state.copy(elapsedSec = elapsed, micLevel = level) }
+                if (generation == recordGeneration && (elapsed >= PcmRecorder.MAX_SECONDS || !recorder.isRunning)) {
                     stopRecording()
                     break
                 }
+            }
+        }
+    }
+
+    /** Slide-away and other cancels drop the clip. They do not transcribe or send. */
+    fun cancelRecording() {
+        recordGeneration += 1
+        viewModelScope.launch {
+            if (!recordGate.tryLock()) return@launch
+            try {
+                if (!_sos.value.recording && !recorder.isRunning) return@launch
+                runtime.relay.onLocalRecordingFinished()
+                recorder.stop()
+                _sos.update {
+                    it.copy(
+                        recording = false,
+                        elapsedSec = 0,
+                        micLevel = 0f,
+                        status = "Hold the button and speak. Tagalog, Bisaya, or English.",
+                        error = null,
+                    )
+                }
+            } finally {
+                recordGate.unlock()
             }
         }
     }

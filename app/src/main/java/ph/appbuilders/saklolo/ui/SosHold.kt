@@ -1,16 +1,18 @@
 package ph.appbuilders.saklolo.ui
 
 /**
- * Sliding a finger off the SOS button is still a hold.
- * Recording ends on pointer-up or a real cancel.
+ * Lifting the finger on the SOS button releases the clip for transcription.
+ * Sliding off the button cancels. A system cancel also cancels.
  */
-internal fun shouldEndSosHold(
+internal enum class SosHoldEnd { Continue, Release, Cancel }
+
+internal fun sosHoldEnd(
     pointerPressed: Boolean,
     outOfBounds: Boolean,
     cancelled: Boolean,
-): Boolean = when {
-    cancelled -> true
-    !pointerPressed -> true
-    outOfBounds -> false
-    else -> false
+): SosHoldEnd = when {
+    cancelled -> SosHoldEnd.Cancel
+    outOfBounds -> SosHoldEnd.Cancel
+    !pointerPressed -> SosHoldEnd.Release
+    else -> SosHoldEnd.Continue
 }

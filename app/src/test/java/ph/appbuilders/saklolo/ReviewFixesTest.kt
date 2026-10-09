@@ -20,8 +20,9 @@ import ph.appbuilders.saklolo.relay.relayStartFailureMessage
 import ph.appbuilders.saklolo.relay.runRelayServiceStart
 import ph.appbuilders.saklolo.stt.SpeechLanguage
 import ph.appbuilders.saklolo.triage.SummaryRefine
+import ph.appbuilders.saklolo.ui.SosHoldEnd
 import ph.appbuilders.saklolo.ui.questionToAutoSend
-import ph.appbuilders.saklolo.ui.shouldEndSosHold
+import ph.appbuilders.saklolo.ui.sosHoldEnd
 
 class ReviewFixesTest {
     @Test
@@ -244,12 +245,27 @@ class ReviewFixesTest {
     }
 
     @Test
-    fun slidingOffTheSosButtonDoesNotEndTheHold() {
-        assertFalse(shouldEndSosHold(pointerPressed = true, outOfBounds = false, cancelled = false))
-        assertFalse(shouldEndSosHold(pointerPressed = true, outOfBounds = true, cancelled = false))
-        assertTrue(shouldEndSosHold(pointerPressed = false, outOfBounds = false, cancelled = false))
-        assertTrue(shouldEndSosHold(pointerPressed = false, outOfBounds = true, cancelled = false))
-        assertTrue(shouldEndSosHold(pointerPressed = true, outOfBounds = true, cancelled = true))
+    fun slidingAwayCancelsAndReleaseSends() {
+        assertEquals(
+            SosHoldEnd.Continue,
+            sosHoldEnd(pointerPressed = true, outOfBounds = false, cancelled = false),
+        )
+        assertEquals(
+            SosHoldEnd.Cancel,
+            sosHoldEnd(pointerPressed = true, outOfBounds = true, cancelled = false),
+        )
+        assertEquals(
+            SosHoldEnd.Cancel,
+            sosHoldEnd(pointerPressed = false, outOfBounds = true, cancelled = false),
+        )
+        assertEquals(
+            SosHoldEnd.Release,
+            sosHoldEnd(pointerPressed = false, outOfBounds = false, cancelled = false),
+        )
+        assertEquals(
+            SosHoldEnd.Cancel,
+            sosHoldEnd(pointerPressed = true, outOfBounds = false, cancelled = true),
+        )
     }
 
     @Test

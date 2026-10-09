@@ -12,8 +12,9 @@ import ph.appbuilders.saklolo.triage.Urgency
 
 val Page = Color(0xFFEDEFF4)
 val Ink = Color(0xFF1F2433)
-/** Darkened from #8A90A0 so body text stays at least 4.5:1 on the page and on white. */
-val InkSoft = Color(0xFF5E6472)
+/** v14 muted body text. */
+val InkSoft = Color(0xFF6B7180)
+val NavMuted = Color(0xFF9AA0AE)
 val Accent = Color(0xFFE3242B)
 /** Darkened red for text on the light-red card. #E3242B on #FDE8E8 is under 4.5. */
 val AccentDeep = Color(0xFFB5161C)
