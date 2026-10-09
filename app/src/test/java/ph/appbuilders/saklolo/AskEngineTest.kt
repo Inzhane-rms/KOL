@@ -14,9 +14,12 @@ class AskEngineTest {
     private val bank: SafetyBank = AskEngine.parse(bundledJson())
 
     @Test
-    fun bankHasEighteenPairsAndThirtyTwoTriggers() {
+    fun bankHasEighteenPairsAndThirtyNineTriggers() {
         assertEquals(18, bank.pairs.size)
-        assertEquals(32, bank.triggers.size)
+        assertEquals(39, bank.triggers.size)
+        val pair = bank.pairs.first { it.id == 3 }
+        assertEquals("Manatili sa loob kung ligtas. Kung binabaha, lumikas sa evacuation center.", pair.answerTl)
+        assertEquals("H,U", pair.sourceCode)
     }
 
     @Test
@@ -63,6 +66,32 @@ class AskEngineTest {
         assertEquals("Emergency ito. Mag-SOS ngayon.", emergency.answerTl)
         assertEquals("This is an emergency. Send an SOS now.", emergency.answerEn)
         assertFalse(emergency.answerTl.contains("tuhod"))
+    }
+
+    @Test
+    fun bareBaliIsNotMedicalButBleedingAndNotBreathingAre() {
+        val bali = AskEngine.answer("Bali, kailan lilikas?", bank)
+        assertFalse(bali is AskResult.Emergency)
+        assertTrue(AskEngine.answer("nagdudugo ang kamay", bank) is AskResult.Emergency)
+        assertTrue(AskEngine.answer("hindi na humihinga", bank) is AskResult.Emergency)
+        assertTrue(AskEngine.answer("bali ang buto", bank) is AskResult.Emergency)
+    }
+
+    @Test
+    fun keywordTipsAreNotMarkedAsModelPicks() {
+        val tip = AskEngine.answer("pwede ba tumawid sa baha?", bank) as AskResult.Tip
+        assertFalse(tip.fromModel)
+        assertFalse(AskEngine.tipFor(bank.pairs.first()).fromModel)
+    }
+
+    @Test
+    fun recorderTopicsUseStoredBankText() {
+        val topics = AskEngine.recorderTopics(bank)
+        assertEquals(listOf("Flood at home", "Someone hurt", "When to evacuate"), topics.map { it.label })
+        assertEquals(bank.pairs.first { it.id == 3 }.questionTl, topics[0].question)
+        assertTrue(bank.triggers.contains(topics[1].question))
+        assertTrue(AskEngine.answer(topics[1].question, bank) is AskResult.Emergency)
+        assertEquals(bank.pairs.first { it.id == 4 }.questionTl, topics[2].question)
     }
 
     @Test

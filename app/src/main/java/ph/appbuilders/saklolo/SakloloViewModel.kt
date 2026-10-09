@@ -156,7 +156,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
                 GemmaSummarizer.chooseAskPair(app, trimmed, catalog, valid)
             } ?: return@launch
             val pair = bank.pairs.firstOrNull { it.id == chosen } ?: return@launch
-            val tip = AskEngine.tipFor(pair)
+            val tip = AskEngine.tipFor(pair).copy(fromModel = true)
             _askTurns.update { turns ->
                 turns.map { turn ->
                     if (turn.id == id && turn.result is AskResult.Fallback) turn.copy(result = tip) else turn
@@ -229,6 +229,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
             if (!recordGate.tryLock()) return@launch
             try {
                 if (!_sos.value.recording && !recorder.isRunning) return@launch
+                runtime.relay.onLocalRecordingFinished()
                 _sos.update { it.copy(recording = false, status = "Transcribing on this phone…", error = null) }
                 val pcm = recorder.stop()
                 if (pcm.size < PcmRecorder.SAMPLE_RATE / 2) {
@@ -363,6 +364,15 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
 
     fun onLocationPermissionGranted() {
         DeviceLocation.start(getApplication())
+    }
+
+    val location: StateFlow<Pair<Double, Double>?> = DeviceLocation.fixes
+
+    fun isLocalOrigin(id: String): Boolean = store.isLocalOrigin(id)
+
+    fun markResponding(id: String) {
+        store.setResponding(id, true)
+        runtime.refreshAlerts()
     }
 
     fun ingestQr(payload: String) {

@@ -91,6 +91,17 @@ object AskEngine {
         pairId = pair.id,
     )
 
+    /** Recorder topic cards. Labels are short; the question text is stored in the bank. */
+    fun recorderTopics(bank: SafetyBank): List<AskSuggestion> {
+        fun question(id: Int) = bank.pairs.first { it.id == id }.questionTl
+        val hurt = bank.triggers.first { it == "nagdudugo" }
+        return listOf(
+            AskSuggestion("Flood at home", question(3)),
+            AskSuggestion("Someone hurt", hurt),
+            AskSuggestion("When to evacuate", question(4)),
+        )
+    }
+
     fun suggestions(bank: SafetyBank): List<AskSuggestion> {
         val labels = mapOf(
             4 to "Kailan lilikas?",
@@ -142,9 +153,12 @@ data class SafetyBank(
     val disclaimerEn: String,
 ) {
     fun sourceLabel(code: String): String =
-        code.split(',').map { it.trim() }.filter { it.isNotEmpty() }.joinToString(" · ") { part ->
+        sourceChips(code).joinToString(" · ")
+
+    fun sourceChips(code: String): List<String> =
+        code.split(',').map { it.trim() }.filter { it.isNotEmpty() }.map { part ->
             when (part) {
-                "H" -> "Gov't Disaster Preparedness Handbook"
+                "H" -> "Gov't handbook"
                 "U" -> "UNICEF Philippines"
                 else -> sources[part] ?: part
             }
@@ -172,6 +186,7 @@ sealed class AskResult {
         val answerEn: String,
         val sourceCode: String,
         val pairId: Int,
+        val fromModel: Boolean = false,
     ) : AskResult()
     data class Fallback(val answerTl: String, val answerEn: String) : AskResult()
 }

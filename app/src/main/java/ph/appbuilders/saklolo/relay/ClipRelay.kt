@@ -17,12 +17,14 @@ object ClipRelay {
         return age in 0..RECENT_CLIP_MS
     }
 
-    fun deletePending(dir: File) {
+    fun isPendingWav(file: File): Boolean =
+        file.isFile && file.name.startsWith("pending-") && file.name.endsWith(".wav")
+
+    /** Deletes leftover incoming clips. [keepNames] are still waiting for their alert. */
+    fun deletePending(dir: File, keepNames: Set<String> = emptySet()) {
         val files = dir.listFiles() ?: return
         for (file in files) {
-            if (file.isFile && file.name.startsWith("pending-") && file.name.endsWith(".wav")) {
-                file.delete()
-            }
+            if (isPendingWav(file) && file.name !in keepNames) file.delete()
         }
     }
 

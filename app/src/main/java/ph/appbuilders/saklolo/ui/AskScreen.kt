@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -24,6 +25,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -35,6 +37,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
@@ -47,28 +52,44 @@ import ph.appbuilders.saklolo.ask.AskEngine
 import ph.appbuilders.saklolo.ask.AskResult
 import ph.appbuilders.saklolo.ask.AskTurn
 import ph.appbuilders.saklolo.ask.SafetyBank
-import ph.appbuilders.saklolo.ui.theme.CriticalRed
-import ph.appbuilders.saklolo.ui.theme.ForestMid
+import ph.appbuilders.saklolo.ui.theme.Accent
+import ph.appbuilders.saklolo.ui.theme.AccentDeep
+import ph.appbuilders.saklolo.ui.theme.ChipWash
+import ph.appbuilders.saklolo.ui.theme.GreenText
 import ph.appbuilders.saklolo.ui.theme.Ink
 import ph.appbuilders.saklolo.ui.theme.InkSoft
-import ph.appbuilders.saklolo.ui.theme.MintWash
+import ph.appbuilders.saklolo.ui.theme.LightRed
+import ph.appbuilders.saklolo.ui.theme.PillAmberBg
+import ph.appbuilders.saklolo.ui.theme.PillAmberText
+import ph.appbuilders.saklolo.ui.theme.PlayerWash
 
 @Composable
 fun AskScreen(
     turns: List<AskTurn>,
     onAsk: (String) -> Unit,
     onOpenRecorder: () -> Unit,
+    seed: String? = null,
+    onSeedConsumed: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val bank = remember { loadBank(context) }
     val suggestions = remember(bank) { AskEngine.suggestions(bank) }
     var draft by remember { mutableStateOf("") }
     val scroll = rememberScrollState()
+    val focus = remember { FocusRequester() }
 
     fun ask(text: String) {
         if (text.isBlank()) return
         draft = ""
         onAsk(text)
+    }
+
+    LaunchedEffect(seed) {
+        val text = seed?.trim().orEmpty()
+        if (text.isNotEmpty()) {
+            draft = text
+            onSeedConsumed()
+        }
     }
 
     LaunchedEffect(turns.size) {
@@ -78,90 +99,115 @@ fun AskScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp)
+            .statusBarsPadding()
+            .padding(horizontal = 20.dp)
             .navigationBarsPadding()
-            .padding(bottom = 96.dp),
+            .padding(bottom = 100.dp),
     ) {
+        Text("Ask B-LINK", color = Ink, fontSize = 26.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))
+        Text("Offline answers from official guides", color = InkSoft, fontSize = 13.sp, modifier = Modifier.padding(bottom = 12.dp))
         Column(
-            Modifier
-                .weight(1f)
-                .verticalScroll(scroll),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            Modifier.weight(1f).verticalScroll(scroll),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             turns.forEach { turn ->
                 QuestionBubble(turn.question)
                 when (val result = turn.result) {
-                    is AskResult.Emergency -> EmergencyCard(result, onOpenRecorder)
+                    is AskResult.Emergency -> EmergencyCard(result.answerTl, result.answerEn, onOpenRecorder)
                     is AskResult.Tip -> TipCard(result, bank)
                     is AskResult.Fallback -> FallbackCard(turn.question, result, bank)
                 }
             }
+            if (turns.isNotEmpty()) {
+                Text("Ask next", color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            }
+            SuggestionRow(suggestions) { ask(it) }
+            EmergencyCard(bank.medicalTl, bank.medicalEn, onOpenRecorder)
         }
-        Text(
-            "TRY ASKING",
-            color = Ink,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
+        AskInput(
+            draft = draft,
+            onDraft = { draft = it },
+            onSend = { ask(draft) },
+            onMic = { focus.requestFocus() },
+            focus = focus,
         )
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            suggestions.forEach { suggestion ->
-                Text(
-                    text = suggestion.label,
-                    color = Ink,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(MintWash)
-                        .clickable { ask(suggestion.question) }
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                )
-            }
-        }
-        Row(
-            modifier = Modifier
-                .padding(top = 12.dp)
-                .fillMaxWidth()
-                .height(60.dp)
-                .clip(RoundedCornerShape(30.dp))
-                .background(Color.White)
-                .padding(start = 18.dp, end = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            BasicTextField(
-                value = draft,
-                onValueChange = { draft = it },
-                textStyle = TextStyle(color = Ink, fontSize = 16.sp),
-                cursorBrush = SolidColor(Ink),
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { ask(draft) }),
-                modifier = Modifier.weight(1f),
-                decorationBox = { inner ->
-                    Box {
-                        if (draft.isEmpty()) {
-                            Text("Magtanong… / Ask a question", color = InkSoft, fontSize = 16.sp)
-                        }
-                        inner()
-                    }
-                },
-            )
-            Box(
+    }
+}
+
+@Composable
+private fun SuggestionRow(suggestions: List<ph.appbuilders.saklolo.ask.AskSuggestion>, onAsk: (String) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        suggestions.forEach { suggestion ->
+            Text(
+                text = suggestion.label,
+                color = Ink,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
                 modifier = Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(ForestMid)
-                    .clickable { ask(draft) },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "Ask", tint = Color.White)
-            }
+                    .softCard(CircleShape)
+                    .clickable { onAsk(suggestion.question) }
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun AskInput(
+    draft: String,
+    onDraft: (String) -> Unit,
+    onSend: () -> Unit,
+    onMic: () -> Unit,
+    focus: FocusRequester,
+) {
+    Row(
+        modifier = Modifier
+            .padding(top = 12.dp)
+            .fillMaxWidth()
+            .height(60.dp)
+            .softCard(RoundedCornerShape(30.dp))
+            .padding(start = 18.dp, end = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        BasicTextField(
+            value = draft,
+            onValueChange = onDraft,
+            textStyle = TextStyle(color = Ink, fontSize = 14.sp),
+            cursorBrush = SolidColor(Ink),
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+            keyboardActions = KeyboardActions(onSend = { onSend() }),
+            modifier = Modifier.weight(1f).focusRequester(focus),
+            decorationBox = { inner ->
+                Box {
+                    if (draft.isEmpty()) Text("Type a question…", color = InkSoft, fontSize = 14.sp)
+                    inner()
+                }
+            },
+        )
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(PlayerWash)
+                .clickable(onClick = onMic),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Filled.Mic, contentDescription = "Focus the question", tint = Ink)
+        }
+        Box(
+            modifier = Modifier
+                .padding(start = 6.dp)
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(Accent)
+                .clickable(onClick = onSend),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "Send question", tint = Color.White)
         }
     }
 }
@@ -172,11 +218,12 @@ private fun QuestionBubble(text: String) {
         Text(
             text = text,
             color = Color.White,
-            fontSize = 16.sp,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
             modifier = Modifier
-                .widthIn(max = 300.dp)
-                .clip(RoundedCornerShape(20.dp))
-                .background(Ink)
+                .widthIn(max = 280.dp)
+                .clip(RoundedCornerShape(23.dp))
+                .background(Accent)
                 .padding(horizontal = 16.dp, vertical = 12.dp),
         )
     }
@@ -185,49 +232,109 @@ private fun QuestionBubble(text: String) {
 @Composable
 private fun TipCard(result: AskResult.Tip, bank: SafetyBank) {
     AnswerCard(
-        label = "ANSWER TO: ${result.askedLabel}",
+        asked = result.askedLabel,
         title = result.answerTl,
         details = result.answerEn,
-        footnote = "${bank.sourceLabel(result.sourceCode)} · ${bank.disclaimerEn} ${bank.disclaimerTl}",
+        chips = bank.sourceChips(result.sourceCode),
+        footnote = "${bank.disclaimerEn} ${bank.disclaimerTl}",
+        fromModel = result.fromModel,
     )
 }
 
 @Composable
 private fun FallbackCard(question: String, result: AskResult.Fallback, bank: SafetyBank) {
     AnswerCard(
-        label = "ANSWER TO: $question",
+        asked = question,
         title = result.answerTl,
         details = result.answerEn,
+        chips = emptyList(),
         footnote = "${bank.disclaimerEn} ${bank.disclaimerTl}",
+        fromModel = false,
     )
 }
 
 @Composable
-private fun AnswerCard(label: String, title: String, details: String, footnote: String) {
+private fun AnswerCard(
+    asked: String,
+    title: String,
+    details: String,
+    chips: List<String>,
+    footnote: String,
+    fromModel: Boolean,
+) {
     Column(
-        Modifier.flatCard(Color.White).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        Modifier.fillMaxWidth().softCard(RoundedCornerShape(28.dp)).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(label, color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-        Text(title, color = Ink, fontSize = 21.sp, fontWeight = FontWeight.Bold)
-        Text(details, color = InkSoft, fontSize = 14.sp)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(28.dp).clip(CircleShape).background(GreenText),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("B", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+            Text("B-LINK · answer", color = InkSoft, fontSize = 12.sp, modifier = Modifier.padding(start = 8.dp))
+        }
+        if (fromModel) {
+            Text(
+                "Pinakamalapit na tip",
+                color = PillAmberText,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(PillAmberBg)
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+            )
+        }
+        Text("SAGOT SA: $asked", color = Ink, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Text(title, color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text(details, color = InkSoft, fontSize = 13.sp)
+        if (chips.isNotEmpty()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+                chips.forEach { chip ->
+                    Text(
+                        chip,
+                        color = Ink,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(ChipWash)
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                    )
+                }
+            }
+        }
         Text(footnote, color = InkSoft, fontSize = 12.sp)
     }
 }
 
 @Composable
-private fun EmergencyCard(result: AskResult.Emergency, onOpenRecorder: () -> Unit) {
-    InfoCard(
-        background = CriticalRed,
-        label = "EMERGENCY?",
-        title = result.answerTl,
-        details = result.answerEn,
-        ink = Color.White,
-        arrowBackground = Color.White,
-        arrowTint = Ink,
-        arrowDescription = "Open SOS recorder",
-        onArrow = onOpenRecorder,
-    )
+private fun EmergencyCard(title: String, details: String, onOpenRecorder: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(28.dp))
+            .background(LightRed)
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(title, color = AccentDeep, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text(details, color = Ink, fontSize = 12.sp)
+        }
+        Box(
+            modifier = Modifier
+                .size(52.dp)
+                .clip(CircleShape)
+                .background(Brush.radialGradient(listOf(Color(0xFFFF4B4B), Accent, Color(0xFFB5161C))))
+                .clickable(onClick = onOpenRecorder),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("SOS", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        }
+    }
 }
 
 private fun loadBank(context: Context): SafetyBank =

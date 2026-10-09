@@ -190,6 +190,7 @@ class NearbyRelay(
             }
         }
         if (fresh.isNotEmpty() || attachedNow.isNotEmpty()) onAlertsChanged()
+        sweepPending()
         val pendingForward = fresh.filter { it.id !in attachedNow }
         if (pendingForward.isNotEmpty()) {
             send(pendingForward, exceptEndpoint = fromEndpoint, forceClips = true)
@@ -202,7 +203,8 @@ class NearbyRelay(
     private fun handleFileSuccess(payloadId: Long, fromEndpoint: String) {
         val payload = synchronized(clipLock) { incomingPayloads.remove(payloadId) } ?: return
         if (payload.type != Payload.Type.FILE) return
-        val uri = payload.asFile()?.asUri()
+        val shared = payload.asFile()
+        val uri = shared?.asUri()
         if (uri == null) {
             Log.w(TAG, "clip has no content uri for $payloadId")
             return
@@ -222,6 +224,7 @@ class NearbyRelay(
             temp.delete()
             return
         }
+        deleteSharedOriginal(shared)
         val alertId = synchronized(clipLock) {
             val known = payloadToAlert[payloadId]
             if (known == null) {
@@ -231,23 +234,64 @@ class NearbyRelay(
                 known
             }
         }
-        if (alertId != null && storeClip(alertId, temp, fromEndpoint)) onAlertsChanged()
+        if (alertId != null) {
+            if (storeClip(alertId, temp, fromEndpoint)) onAlertsChanged()
+            else if (temp.exists()) {
+                synchronized(clipLock) { completedFiles[payloadId] = temp }
+            }
+        }
+        sweepPending()
+    }
+
+    /** Drops the Nearby download once the bytes are in app storage. Skips it when the file is locked. */
+    @Suppress("DEPRECATION")
+    private fun deleteSharedOriginal(shared: Payload.File) {
+        val javaFile = try {
+            shared.asJavaFile()
+        } catch (error: Throwable) {
+            Log.w(TAG, "shared clip is not accessible", error)
+            null
+        }
+        if (javaFile == null || !javaFile.exists()) return
+        if (!javaFile.delete()) {
+            Log.w(TAG, "could not delete shared clip ${javaFile.name}")
+        }
+    }
+
+    /** Incoming voice transfer finished, or the local recording stopped. */
+    fun onLocalRecordingFinished() {
+        io.execute { sweepPending() }
+    }
+
+    private fun sweepPending() {
+        val keep = synchronized(clipLock) { completedFiles.values.map { it.name }.toSet() }
+        ClipRelay.deletePending(clipsDir, keep)
     }
 
     private fun storeClip(alertId: String, source: File, fromEndpoint: String?): Boolean {
         if (!source.exists()) return false
-        if (source.length() !in 45..MAX_CLIP_BYTES) return false
+        if (source.length() !in 45..MAX_CLIP_BYTES) {
+            discardPending(source)
+            return false
+        }
         val current = store.find(alertId) ?: return false
         val existing = current.audioPath
         if (existing != null && File(existing).let { it.exists() && it.length() > WavPcm.HEADER_BYTES }) {
+            discardPending(source)
             return false
         }
         val dest = WavPcm.clipFile(clipsDir, alertId)
         if (!copyClip(source, dest)) return false
+        discardPending(source)
         store.attachAudio(alertId, dest.absolutePath)
         val updated = store.find(alertId) ?: return true
         send(listOf(updated), exceptEndpoint = fromEndpoint, forceClips = true)
         return true
+    }
+
+    private fun discardPending(source: File) {
+        if (!ClipRelay.isPendingWav(source)) return
+        if (!source.delete()) Log.w(TAG, "could not delete ${source.name}")
     }
 
     private fun copyClip(source: File, dest: File): Boolean {

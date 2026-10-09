@@ -104,7 +104,7 @@ Nearby Connections uses Google Play Services. A phone without Play Services can 
 
 ## Project layout
 
-- `app/src/main/java/ph/appbuilders/saklolo/ui` — recorder, Ask B-LINK, responder feed, light v4 layout
+- `app/src/main/java/ph/appbuilders/saklolo/ui` — recorder, Ask B-LINK, responder feed, light v12 layout
 - `ask` — offline safety Q&A. Answers are the bundled sentences, not generated text
 - `stt` — whisper.cpp JNI, 16 kHz recorder, model install
 - `triage` — keyword summary and urgency

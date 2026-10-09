@@ -18,8 +18,10 @@ data class Alert(
     val summarySource: String = "RULES",
     /** Local wav path. Never put this on the wire. */
     val audioPath: String? = null,
-    /** How many nearby phones this device handed the alert to. Local only. */
+    /** How many nearby phones this device handed the alert to. Local only. Not a receipt. */
     val deliveredCount: Int = 0,
+    /** This phone marked the alert as being responded to. Local only. Never on the wire. */
+    val responding: Boolean = false,
 )
 
 fun List<Alert>.sortedForFeed(): List<Alert> =

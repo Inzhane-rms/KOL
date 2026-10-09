@@ -8,11 +8,13 @@ import androidx.core.content.ContextCompat
 
 /**
  * Runtime permissions Nearby Connections needs before advertise or discovery.
- * Microphone and camera are separate; starting the relay does not wait on them.
+ * Location is still requested on every version. On API 33+ approximate
+ * (coarse) location is enough to start the relay. On API 31–32 precise
+ * location is still required. Microphone and camera are separate.
  */
 object RelayPermissions {
     fun required(sdkInt: Int): List<String> {
-        val names = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        val names = mutableListOf<String>()
         if (sdkInt >= Build.VERSION_CODES.S) {
             names += Manifest.permission.BLUETOOTH_SCAN
             names += Manifest.permission.BLUETOOTH_ADVERTISE
@@ -20,12 +22,38 @@ object RelayPermissions {
         }
         if (sdkInt >= Build.VERSION_CODES.TIRAMISU) {
             names += Manifest.permission.NEARBY_WIFI_DEVICES
+        } else {
+            names += Manifest.permission.ACCESS_FINE_LOCATION
         }
         return names
     }
 
-    fun granted(context: Context, sdkInt: Int = Build.VERSION.SDK_INT): Boolean =
-        required(sdkInt).all { name ->
-            ContextCompat.checkSelfPermission(context, name) == PackageManager.PERMISSION_GRANTED
-        }
+    /** API 33+ accepts coarse or fine. Older versions accept only fine. */
+    fun locationSatisfied(sdkInt: Int, fine: Boolean, coarse: Boolean): Boolean {
+        if (sdkInt >= Build.VERSION_CODES.TIRAMISU) return fine || coarse
+        return fine
+    }
+
+    /** Android 12 granted Approximate and not Precise. The relay cannot start. */
+    fun needsPreciseChoice(sdkInt: Int, fine: Boolean, coarse: Boolean): Boolean =
+        sdkInt in Build.VERSION_CODES.S until Build.VERSION_CODES.TIRAMISU && coarse && !fine
+
+    fun granted(context: Context, sdkInt: Int = Build.VERSION.SDK_INT): Boolean {
+        if (required(sdkInt).any { !isGranted(context, it) }) return false
+        return locationSatisfied(
+            sdkInt,
+            fine = isGranted(context, Manifest.permission.ACCESS_FINE_LOCATION),
+            coarse = isGranted(context, Manifest.permission.ACCESS_COARSE_LOCATION),
+        )
+    }
+
+    fun needsPreciseChoice(context: Context, sdkInt: Int = Build.VERSION.SDK_INT): Boolean =
+        needsPreciseChoice(
+            sdkInt,
+            fine = isGranted(context, Manifest.permission.ACCESS_FINE_LOCATION),
+            coarse = isGranted(context, Manifest.permission.ACCESS_COARSE_LOCATION),
+        )
+
+    private fun isGranted(context: Context, permission: String): Boolean =
+        ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
 }

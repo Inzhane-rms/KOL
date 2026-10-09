@@ -35,8 +35,15 @@
    "nalunod",
    "lunod",
    "nalumos",
-   "bali",
-   "broken bone"
+   "broken bone",
+   "nabali",
+   "bali ang buto",
+   "naiipit",
+   "nagdudugo",
+   "dumugo",
+   "nalulunod na",
+   "di humihinga",
+   "hindi na humihinga"
   ],
   "answer_tl": "Emergency ito. Mag-SOS ngayon.",
   "answer_en": "This is an emergency. Send an SOS now.",
@@ -63,8 +70,8 @@
    "id": 3,
    "q_tl": "Ano ang gagawin habang may bagyo?",
    "q_en": "What do I do during the typhoon?",
-   "a_tl": "Manatili sa loob, maging kalmado, at makinig sa balita.",
-   "a_en": "Stay indoors, stay calm, and follow the news.",
+   "a_tl": "Manatili sa loob kung ligtas. Kung binabaha, lumikas sa evacuation center.",
+   "a_en": "Stay indoors if safe. If your home is flooding, go to the evacuation center.",
    "src": "H,U"
   },
   {

@@ -53,3 +53,26 @@ fun formatDelivered(count: Int): String =
 
 fun sourceLabel(source: String): String =
     if (source == "AI") "On-device AI" else "Keyword rules"
+
+fun statusPill(gemmaLoading: Boolean, peers: Int): String =
+    if (gemmaLoading) "AI loading…" else "Offline · $peers nearby"
+
+fun locationPill(lat: Double?, lon: Double?): String {
+    if (lat == null || lon == null) return "No GPS"
+    return String.format(Locale.US, "%.2f, %.2f · GPS", lat, lon)
+}
+
+fun holdLabel(recording: Boolean, elapsedSec: Int): String =
+    if (!recording) "Hold" else "Hold · %d:%02d".format(elapsedSec / 60, elapsedSec % 60)
+
+/**
+ * Recorded means this phone made the clip. Sent means this phone queued it to at
+ * least one peer. Delivered stays false: there is no peer receipt yet.
+ */
+data class AlertProgress(val recorded: Boolean, val sent: Boolean, val delivered: Boolean)
+
+fun alertProgress(localOrigin: Boolean, deliveredCount: Int): AlertProgress = AlertProgress(
+    recorded = localOrigin,
+    sent = deliveredCount > 0,
+    delivered = false,
+)

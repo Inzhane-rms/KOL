@@ -77,6 +77,13 @@ class AlertStore(private val persistence: AlertPersistence) {
         persist()
     }
 
+    fun setResponding(id: String, responding: Boolean) = synchronized(this) {
+        val current = alerts[id] ?: return
+        if (current.responding == responding) return
+        alerts[id] = current.copy(responding = responding)
+        persist()
+    }
+
     /** One-time copy of an older log. Does not increment hops. */
     fun importExisting(existing: List<Alert>, origins: Set<String>) = synchronized(this) {
         if (alerts.isNotEmpty()) return
