@@ -12,6 +12,9 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.ActivityCompat
+import android.content.ClipData
+import android.content.ClipboardManager
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -20,12 +23,17 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -34,32 +42,37 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import ph.appbuilders.saklolo.SakloloViewModel
-import ph.appbuilders.saklolo.group.recordIntent
-import ph.appbuilders.saklolo.group.RecordIntent
+import ph.appbuilders.saklolo.contact.CallPhase
 import ph.appbuilders.saklolo.relay.RelayPermissions
 import ph.appbuilders.saklolo.relay.RelayService
 import ph.appbuilders.saklolo.ui.theme.Ink
 
-private const val HOME = "home"
-private const val CHAT = "chat"
-private const val JOIN = "join"
-private const val FIND = "find"
-private const val FEED = "feed"
+private const val CONTACTS = "contacts"
+private const val MESSAGES = "messages"
+private const val ADD = "add"
+private const val FEED = "sos"
+private const val THREAD = "thread"
+private const val CALL = "call"
 
 @Composable
 fun SakloloApp(viewModel: SakloloViewModel) {
     val sos by viewModel.sos.collectAsStateWithLifecycle()
     val alerts by viewModel.alerts.collectAsStateWithLifecycle()
-    val groups by viewModel.groups.collectAsStateWithLifecycle()
-    val groupNotes by viewModel.groupNotes.collectAsStateWithLifecycle()
-    val sightings by viewModel.sightings.collectAsStateWithLifecycle()
-    val activeGroup by viewModel.activeGroup.collectAsStateWithLifecycle()
+    val contacts by viewModel.contacts.collectAsStateWithLifecycle()
+    val messages by viewModel.directMessages.collectAsStateWithLifecycle()
+    val threads by viewModel.threads.collectAsStateWithLifecycle()
+    val call by viewModel.callUi.collectAsStateWithLifecycle()
     val voice by viewModel.voice.collectAsStateWithLifecycle()
-    val peers by viewModel.peers.collectAsStateWithLifecycle()
     val notice by viewModel.notice.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    var route by remember { mutableStateOf(HOME) }
+    var route by remember { mutableStateOf(CONTACTS) }
+    var peerId by remember { mutableStateOf<String?>(null) }
+    var filter by remember { mutableStateOf("all") }
+    var draft by remember { mutableStateOf("") }
+    var search by remember { mutableStateOf("") }
+    var quickCall by remember { mutableStateOf(false) }
+    var nameDraft by remember { mutableStateOf(viewModel.displayName()) }
     var settingsOpen by remember { mutableStateOf(false) }
     var askedBattery by remember { mutableStateOf(false) }
     var askedMic by remember { mutableStateOf(false) }
@@ -139,20 +152,39 @@ fun SakloloApp(viewModel: SakloloViewModel) {
         }
     }
 
-    val chatRead by viewModel.chatReadMillis.collectAsStateWithLifecycle()
-    var displayName by remember { mutableStateOf(viewModel.displayName()) }
-    val heard = sightings.filter { activeGroup == null || it.groupId == activeGroup?.id }
-    val unread = groupNotes.count { note ->
-        val groupId = activeGroup?.id
-        groupId != null &&
-            note.groupId == groupId &&
-            note.sender != displayName &&
-            note.kind != "ping" &&
-            note.createdAtMillis > chatRead
+    val unread = threads.sumOf { it.unread }
+    val now = System.currentTimeMillis()
+    val openRow = contacts.firstOrNull { it.deviceId == peerId }
+    val threadMessages = messages.filter { message ->
+        val other = if (viewModel.isMine(message)) message.toDeviceId else message.fromDeviceId
+        other == peerId && message.kind in setOf("text", "voice", "ping", "call_clip")
     }
-    val showSheet = voice.recording || voice.transcript.isNotBlank() || voice.status.isNotBlank()
-    LaunchedEffect(route) {
-        if (route == CHAT) viewModel.markChatRead()
+    val qrPayload = viewModel.myQr()
+    val qrImage by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, qrPayload) {
+        value = withContext(Dispatchers.Default) { qrBitmap(qrPayload).asImageBitmap() }
+    }
+    LaunchedEffect(nameDraft) {
+        delay(400)
+        if (nameDraft != viewModel.displayName()) viewModel.setDisplayName(nameDraft)
+    }
+    LaunchedEffect(route, peerId, openRow) {
+        if (route == THREAD && peerId != null) viewModel.markThreadRead(peerId!!)
+        if (route == THREAD && openRow == null) route = CONTACTS
+    }
+    LaunchedEffect(call.phase) {
+        if (call.phase == CallPhase.INCOMING || call.phase == CallPhase.OUTGOING || call.phase == CallPhase.ACTIVE) {
+            if (route != CALL) route = CALL
+        }
+    }
+    BackHandler(enabled = route == THREAD || route == CALL || quickCall) {
+        when {
+            quickCall -> quickCall = false
+            route == CALL -> {
+                viewModel.endCall()
+                route = if (peerId != null) THREAD else CONTACTS
+            }
+            else -> route = CONTACTS
+        }
     }
 
     fun ensureMic(onReady: () -> Unit) {
@@ -178,38 +210,47 @@ fun SakloloApp(viewModel: SakloloViewModel) {
         }
     }
 
-    V16Frame(
-        peers = peers.size,
+    fun openThread(id: String) {
+        peerId = id
+        draft = ""
+        quickCall = false
+        route = THREAD
+    }
+
+    fun place(id: String) {
+        val row = contacts.firstOrNull { it.deviceId == id }
+        if (row == null || !row.inRange) {
+            viewModel.placeCall(id)
+            return
+        }
+        peerId = id
+        quickCall = false
+        viewModel.placeCall(id)
+        route = CALL
+    }
+
+    V17Scaffold(
         route = when (route) {
-            CHAT, JOIN -> CHAT
-            FIND -> FIND
-            FEED -> FEED
-            else -> HOME
+            MESSAGES -> "messages"
+            ADD -> "add"
+            FEED -> "sos"
+            else -> "contacts"
         },
         unread = unread,
-        recording = voice.recording,
+        showTabs = route != CALL,
         notice = notice,
         onDismissNotice = viewModel::clearNotice,
-        onHome = { route = HOME },
-        onChat = { route = if (activeGroup == null) JOIN else CHAT },
-        onRecord = {
-            if (voice.recording) {
-                viewModel.stopVoiceNote(sendAfter = false)
-            } else when (recordIntent(groups.size)) {
-                RecordIntent.OpenQrJoin -> route = JOIN
-                RecordIntent.RecordVoice -> ensureMic { viewModel.startVoiceNote() }
-            }
-        },
-        onFind = { route = FIND },
+        onContacts = { route = CONTACTS },
+        onMessages = { route = MESSAGES },
+        onCall = { quickCall = true },
+        onAdd = { route = ADD },
         onSos = { route = FEED },
-        sheet = if (showSheet) {
+        overlay = if (quickCall && route != CALL) {
             {
-                V16RecordSheet(
-                    groupName = activeGroup?.name ?: "Barkada",
-                    voice = voice,
-                    members = heard.size,
-                    onCancel = viewModel::cancelVoiceNote,
-                    onSend = viewModel::sendPendingVoice,
+                V17QuickCall(
+                    rows = contacts.filter { it.inRange },
+                    onCall = { place(it.deviceId) },
+                    onClose = { quickCall = false },
                 )
             }
         } else {
@@ -217,31 +258,70 @@ fun SakloloApp(viewModel: SakloloViewModel) {
         },
     ) {
         when (route) {
-            CHAT -> V16Chat(
-                group = activeGroup,
-                notes = groupNotes,
-                displayName = displayName,
-                memberCount = heard.size,
-                onSend = viewModel::sendGroupText,
-                onPlay = viewModel::playNote,
-                onSendToMedics = viewModel::sendNoteToMedics,
-            )
-            JOIN -> V16Join(
-                group = activeGroup,
-                memberCount = heard.size,
-                displayName = displayName,
-                onDisplayName = { name ->
-                    displayName = name
-                    viewModel.setDisplayName(name)
+            THREAD -> {
+                val row = openRow
+                if (row != null) {
+                    V17Thread(
+                        row = row,
+                        messages = threadMessages,
+                        mine = viewModel::isMine,
+                        draft = draft,
+                        onDraft = { draft = it },
+                        onSend = {
+                            viewModel.sendDirect(row.deviceId, draft)
+                            draft = ""
+                        },
+                        onMic = {
+                            if (voice.recording) viewModel.stopVoiceNote(sendAfter = true)
+                            else ensureMic { viewModel.startVoiceNote(row.deviceId) }
+                        },
+                        recording = voice.recording,
+                        onPing = { viewModel.sendPing(row.deviceId) },
+                        onCall = { place(row.deviceId) },
+                        onBack = { route = CONTACTS },
+                        onFavorite = { viewModel.toggleFavorite(row.deviceId) },
+                        onPlay = viewModel::playNote,
+                        now = now,
+                    )
+                }
+            }
+            CALL -> V17InCall(
+                call = call,
+                inRange = contacts.firstOrNull { it.deviceId == call.peerId }?.inRange == true,
+                onSos = viewModel::sendCallSos,
+                onDismiss = viewModel::dismissEmergency,
+                onHoldStart = { ensureMic { viewModel.startHold() } },
+                onHoldEnd = viewModel::stopHold,
+                onSpeaker = { viewModel.setSpeaker(!call.speakerOn) },
+                onEnd = {
+                    viewModel.endCall()
+                    route = if (peerId != null) THREAD else CONTACTS
                 },
-                onCreate = { name -> viewModel.createGroup(name) },
-                onScan = { scanQr() },
+                onAccept = viewModel::acceptCall,
+                onDecline = {
+                    viewModel.declineCall()
+                    route = CONTACTS
+                },
             )
-            FIND -> V16Find(
-                sightings = heard,
-                displayName = displayName,
-                onPing = viewModel::pingGroup,
-                onRefresh = viewModel::refreshGroups,
+            MESSAGES -> V17Messages(
+                threads = threads,
+                query = search,
+                onQuery = { search = it },
+                now = now,
+                onOpen = { openThread(it.peerId) },
+                onSos = { viewModel.sendSosText(it.criticalBody) },
+            )
+            ADD -> V17Add(
+                name = nameDraft,
+                code = viewModel.shortCode(),
+                qr = qrImage,
+                recent = contacts.filter { it.saved }.sortedByDescending { it.addedAtMillis },
+                now = now,
+                bluetooth = bluetoothOn(context),
+                onName = { nameDraft = it.take(40) },
+                onScan = { scanQr() },
+                onShare = { shareCode(context, qrPayload) },
+                onCall = { place(it.deviceId) },
             )
             FEED -> V16Sos(
                 sos = sos,
@@ -256,18 +336,14 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                 onRespond = viewModel::markResponding,
                 clipReady = viewModel::clipReady,
             )
-            else -> V16Home(
-                displayName = displayName,
-                group = activeGroup,
-                notes = groupNotes,
-                sightings = sightings,
-                onOpenChat = { route = if (activeGroup == null) JOIN else CHAT },
-                onOpenJoin = { route = JOIN },
-                onOpenFind = { route = FIND },
-                onPing = viewModel::pingGroup,
-                onOpenSos = { route = FEED },
-                onPlay = viewModel::playNote,
-                onSettings = { settingsOpen = true },
+            else -> V17Contacts(
+                rows = contacts,
+                filter = filter,
+                onFilter = { filter = it },
+                now = now,
+                onOpen = { openThread(it.deviceId) },
+                onCall = { place(it.deviceId) },
+                onScan = { scanQr() },
             )
         }
         if (micBlocked) {
@@ -277,7 +353,7 @@ fun SakloloApp(viewModel: SakloloViewModel) {
         }
         if (cameraBlocked) {
             Text(
-                "Camera is off. Allow it to scan a group QR.",
+                "Camera is off. Allow it to scan a contact QR.",
                 color = Ink,
                 fontSize = 13.sp,
                 modifier = Modifier.padding(top = 8.dp),
@@ -303,9 +379,19 @@ fun SakloloApp(viewModel: SakloloViewModel) {
     }
 }
 
+private fun shareCode(context: Context, payload: String) {
+    val clipboard = context.getSystemService(ClipboardManager::class.java)
+    clipboard?.setPrimaryClip(ClipData.newPlainText("B-LINK", payload))
+    val send = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_TEXT, payload)
+    }
+    runCatching { context.startActivity(Intent.createChooser(send, "Share my code")) }
+}
+
 private fun scanOptions(): ScanOptions = ScanOptions().apply {
     setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-    setPrompt("Scan a B-LINK group QR to join")
+    setPrompt("Scan their contact QR")
     setBeepEnabled(false)
     setOrientationLocked(true)
 }

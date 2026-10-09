@@ -16,6 +16,13 @@ import com.google.android.gms.nearby.connection.PayloadCallback
 import com.google.android.gms.nearby.connection.PayloadTransferUpdate
 import com.google.android.gms.nearby.connection.Strategy
 import ph.appbuilders.saklolo.audio.WavPcm
+import ph.appbuilders.saklolo.contact.DirectGate
+import ph.appbuilders.saklolo.contact.DirectMessage
+import ph.appbuilders.saklolo.contact.DirectStore
+import ph.appbuilders.saklolo.contact.EndpointCard
+import ph.appbuilders.saklolo.contact.ResyncPlan
+import ph.appbuilders.saklolo.contact.toDirect
+import ph.appbuilders.saklolo.contact.toWire
 import ph.appbuilders.saklolo.group.ClipGate
 import ph.appbuilders.saklolo.group.GroupNote
 import ph.appbuilders.saklolo.group.GroupStore
@@ -45,9 +52,11 @@ class NearbyRelay(
     context: Context,
     private val store: AlertStore,
     private val groupStore: GroupStore,
+    private val directStore: DirectStore,
     private val clipsDir: File,
     private val onAlertsChanged: () -> Unit,
     private val onGroupsChanged: () -> Unit,
+    private val onDirectChanged: () -> Unit,
     private val onStatus: (peers: List<NearbyPeer>, message: String) -> Unit,
 ) {
     private val appContext = context.applicationContext
@@ -59,6 +68,9 @@ class NearbyRelay(
     private val completedFiles = HashMap<Long, File>()
     private val outgoingClips = LinkedHashMap<Long, OutClip>()
     private val io = Executors.newSingleThreadExecutor { runnable -> Thread(runnable, "saklolo-relay-io") }
+    private val queueLock = Any()
+    private val liveJobs = ArrayDeque<() -> Unit>()
+    private val historyJobs = ArrayDeque<() -> Unit>()
 
     init {
         ClipRelay.deletePending(clipsDir)
@@ -91,9 +103,49 @@ class NearbyRelay(
 
     fun peers(): List<NearbyPeer> = endpoints.snapshot()
 
-    fun broadcast(alert: Alert): Int = send(listOf(alert), exceptEndpoint = null, forceClips = true)
+    fun broadcast(alert: Alert): Int {
+        val count = endpoints.snapshot(null).size
+        enqueue(live = true) {
+            Log.d(BLINK, "send type=sos id=${alert.id} size=bytes endpoints=$count")
+            send(listOf(alert), exceptEndpoint = null, forceClips = true)
+        }
+        return count
+    }
 
     fun broadcastNote(note: GroupNote): Int = sendNotes(listOf(note), exceptEndpoint = null, forceClips = true)
+
+    fun broadcastDirect(message: DirectMessage): Int {
+        val peers = endpoints.snapshot(null)
+        enqueue(live = true) {
+            val withClip = !message.audioPath.isNullOrBlank()
+            Log.d(BLINK, "send type=${message.kind} id=${message.id} to=${message.toDeviceId} endpoints=${peers.size} clips=$withClip")
+            for (job in ResyncPlan.live(peers.map { it.endpointId }, message, withClip)) {
+                deliverDirect(job.endpointId, job.messages, job.attachClips)
+            }
+        }
+        return peers.size
+    }
+
+    /** Live work runs before a history dump already queued for a new peer. */
+    private fun enqueue(live: Boolean, job: () -> Unit) {
+        synchronized(queueLock) {
+            if (live) liveJobs.addLast(job) else historyJobs.addLast(job)
+        }
+        io.execute { drain() }
+    }
+
+    private fun drain() {
+        while (true) {
+            val job = synchronized(queueLock) {
+                liveJobs.removeFirstOrNull() ?: historyJobs.removeFirstOrNull()
+            } ?: return
+            try {
+                job()
+            } catch (error: Exception) {
+                Log.w(BLINK, "relay job failed", error)
+            }
+        }
+    }
 
     private fun beginAdvertising() {
         val advertising = AdvertisingOptions.Builder().setStrategy(Strategy.P2P_CLUSTER).build()
@@ -167,7 +219,10 @@ class NearbyRelay(
     private fun resumeClips(clips: List<OutClip>) {
         for (clip in clips.distinctBy { it.ownerId }) {
             if (!clip.file.exists()) continue
-            if (clip.note) {
+            if (clip.direct) {
+                val message = directStore.find(clip.ownerId) ?: continue
+                deliverDirect(clip.endpointId, listOf(message.copy(audioPath = clip.file.absolutePath)), attachClips = true)
+            } else if (clip.note) {
                 val note = groupStore.find(clip.ownerId) ?: continue
                 deliverNotes(clip.endpointId, listOf(note.copy(audioPath = clip.file.absolutePath)))
             } else {
@@ -259,13 +314,64 @@ class NearbyRelay(
         return ready
     }
 
-    private fun sendFiles(endpointId: String, files: List<ReadyClip>, note: Boolean) {
+    private fun sendFiles(endpointId: String, files: List<ReadyClip>, note: Boolean, direct: Boolean = false) {
         for (file in files) {
             synchronized(clipLock) {
-                outgoingClips[file.payload.id] = OutClip(endpointId, file.payload.id, file.ownerId, file.file, note)
+                outgoingClips[file.payload.id] = OutClip(
+                    endpointId,
+                    file.payload.id,
+                    file.ownerId,
+                    file.file,
+                    note,
+                    direct,
+                )
             }
+            Log.d(BLINK, "file start id=${file.ownerId} payload=${file.payload.id} to=$endpointId")
             client.sendPayload(endpointId, file.payload)
         }
+    }
+
+    private fun deliverDirect(endpointId: String, messages: List<DirectMessage>, attachClips: Boolean): Boolean {
+        if (messages.isEmpty()) return false
+        var sent = false
+        var current = ArrayList<DirectMessage>()
+        fun flush(chunk: List<DirectMessage>) {
+            if (chunk.isEmpty()) return
+            val prepared = chunk.map { if (attachClips) it else it.copy(audioPath = null) }
+            val files = if (attachClips) prepareFiles(prepared.map { it.id to it.audioPath }) else emptyList()
+            val bytes = AlertJson.encodeEnvelope(
+                emptyList(),
+                files.map { ClipLink(it.ownerId, it.payload.id) },
+                emptyList(),
+                prepared.map { it.toWire() },
+            ).toByteArray(Charsets.UTF_8)
+            if (bytes.size > MAX_PAYLOAD) {
+                Log.w(BLINK, "skipping oversized direct payload (${bytes.size} bytes)")
+                return
+            }
+            val result = runCatching { client.sendPayload(endpointId, Payload.fromBytes(bytes)) }
+            Log.d(
+                BLINK,
+                "send type=direct ids=${prepared.joinToString(",") { it.id }} to=$endpointId size=${bytes.size} clips=${files.size} result=${result.isSuccess}",
+            )
+            if (result.isSuccess) {
+                if (files.isNotEmpty()) sendFiles(endpointId, files, note = false, direct = true)
+                sent = true
+            }
+        }
+        for (message in messages) {
+            val candidate = current + message
+            val tooBig = AlertJson.encodeEnvelope(emptyList(), emptyList(), emptyList(), candidate.map { it.toWire() })
+                .toByteArray(Charsets.UTF_8).size > MAX_PAYLOAD
+            if (tooBig && current.isNotEmpty()) {
+                flush(current)
+                current = arrayListOf(message)
+            } else {
+                current.add(message)
+            }
+        }
+        flush(current)
+        return sent
     }
 
     private fun chunk(wire: List<Alert>): List<List<Alert>> {
@@ -287,6 +393,12 @@ class NearbyRelay(
 
     private fun publish(message: String) {
         onStatus(endpoints.snapshot(), message)
+    }
+
+    private fun syncNearby() {
+        val ids = endpoints.snapshot().mapNotNull { EndpointCard.decode(it.name)?.deviceId }.toSet()
+        directStore.setNearby(ids)
+        onDirectChanged()
     }
 
     private fun handleBytes(fromEndpoint: String, payload: Payload) {
@@ -312,8 +424,22 @@ class NearbyRelay(
                 attachedNow += link.alertId
             }
         }
+        val freshDirect = directStore.ingest(packet.direct.map { it.toDirect() }, System.currentTimeMillis())
+        Log.d(
+            BLINK,
+            "receive endpoint=$fromEndpoint type=bytes alerts=${packet.alerts.size} direct=${packet.direct.size} accepted=${freshDirect.size}",
+        )
         if (fresh.isNotEmpty() || attachedNow.any { store.find(it) != null }) onAlertsChanged()
         if (freshNotes.isNotEmpty() || attachedNow.any { groupStore.find(it) != null }) onGroupsChanged()
+        if (freshDirect.isNotEmpty()) onDirectChanged()
+        val forwardDirect = freshDirect.filter { DirectGate.shouldForward(it, directStore.myId) }
+        if (forwardDirect.isNotEmpty()) {
+            enqueue(live = true) {
+                for (peer in endpoints.snapshot(fromEndpoint)) {
+                    deliverDirect(peer.endpointId, forwardDirect, attachClips = false)
+                }
+            }
+        }
         sweepPending()
         val pendingForward = fresh.filter { it.id !in attachedNow }
         if (pendingForward.isNotEmpty()) {
@@ -400,6 +526,7 @@ class NearbyRelay(
             return false
         }
         if (store.find(ownerId) != null) return storeAlertClip(ownerId, source, fromEndpoint)
+        if (directStore.find(ownerId) != null) return storeDirectClip(ownerId, source, fromEndpoint)
         if (groupStore.find(ownerId) != null) return storeNoteClip(ownerId, source, fromEndpoint)
         return false
     }
@@ -417,6 +544,30 @@ class NearbyRelay(
         store.attachAudio(alertId, dest.absolutePath)
         val updated = store.find(alertId) ?: return true
         send(listOf(updated), exceptEndpoint = fromEndpoint, forceClips = true)
+        return true
+    }
+
+    private fun storeDirectClip(messageId: String, source: File, fromEndpoint: String?): Boolean {
+        val current = directStore.find(messageId) ?: return false
+        val existing = current.audioPath
+        if (existing != null && File(existing).let { it.exists() && it.length() > WavPcm.HEADER_BYTES }) {
+            discardPending(source)
+            return false
+        }
+        val dest = WavPcm.clipFile(clipsDir, messageId)
+        if (!copyClip(source, dest)) return false
+        discardPending(source)
+        directStore.attachAudio(messageId, dest.absolutePath)
+        onDirectChanged()
+        Log.d(BLINK, "file stored id=$messageId")
+        val updated = directStore.find(messageId) ?: return true
+        if (DirectGate.shouldForward(updated, directStore.myId)) {
+            enqueue(live = true) {
+                for (peer in endpoints.snapshot(fromEndpoint)) {
+                    deliverDirect(peer.endpointId, listOf(updated), attachClips = true)
+                }
+            }
+        }
         return true
     }
 
@@ -470,6 +621,7 @@ class NearbyRelay(
                 status == PayloadTransferUpdate.Status.FAILURE ||
                 status == PayloadTransferUpdate.Status.CANCELED
             ) {
+                Log.d(BLINK, "file progress payload=${update.payloadId} status=$status")
                 synchronized(clipLock) { outgoingClips.remove(update.payloadId) }
             }
             if (status != PayloadTransferUpdate.Status.SUCCESS) return
@@ -493,9 +645,21 @@ class NearbyRelay(
         override fun onConnectionResult(endpointId: String, result: ConnectionResolution) {
             if (result.status.isSuccess) {
                 endpoints.markConnected(endpointId, "Nearby phone", System.currentTimeMillis())
+                val peerName = endpoints.snapshot().firstOrNull { it.endpointId == endpointId }?.name
+                val card = EndpointCard.decode(peerName)
+                Log.d(BLINK, "join endpoint=$endpointId name=$peerName parsed=${card != null}")
+                if (card != null) {
+                    directStore.notePeer(card.deviceId, card.name, System.currentTimeMillis())
+                }
+                syncNearby()
                 publish("Connected to a nearby phone")
-                send(store.snapshot(), exceptEndpoint = null, forceClips = false)
-                sendNotes(groupStore.relayable(), exceptEndpoint = null, forceClips = false)
+                enqueue(live = false) {
+                    val plan = ResyncPlan.history(endpointId, directStore.relayHistory())
+                    val alerts = store.snapshot().map { it.copy(audioPath = null) }
+                    Log.d(BLINK, "resync endpoint=$endpointId alerts=${alerts.size} direct=${plan.messages.size} clips=false")
+                    if (alerts.isNotEmpty()) deliverAlerts(endpointId, alerts)
+                    if (plan.messages.isNotEmpty()) deliverDirect(endpointId, plan.messages, attachClips = false)
+                }
             } else {
                 endpoints.markConnectFailed(endpointId)
                 Log.w(TAG, "connection failed ${result.status}")
@@ -504,6 +668,7 @@ class NearbyRelay(
 
         override fun onDisconnected(endpointId: String) {
             endpoints.markDisconnected(endpointId)
+            syncNearby()
             val peers = endpoints.snapshot()
             publish(if (peers.isEmpty()) "Looking for nearby B-LINK phones" else "A phone disconnected")
         }
@@ -527,6 +692,7 @@ class NearbyRelay(
 
     companion object {
         private const val TAG = "SakloloRelay"
+        private const val BLINK = "BLINK"
         const val SERVICE_ID = "ph.appbuilders.saklolo.relay"
         private const val MAX_PAYLOAD = NoteRelay.MAX_BYTES
     }
@@ -538,6 +704,7 @@ private data class OutClip(
     val ownerId: String,
     val file: File,
     val note: Boolean,
+    val direct: Boolean = false,
 )
 
 private data class ReadyClip(

@@ -171,6 +171,15 @@ class TriageEngineTest {
     }
 
     @Test
+    fun aDevicePatayDoesNotCancelAnotherDeathInTheSameLine() {
+        assertEquals(Urgency.CRITICAL, TriageEngine.triage("patay na siya, patay na phone ko").urgency)
+        assertEquals(Urgency.CRITICAL, TriageEngine.triage("patay na phone ko, patay na siya").urgency)
+        assertEquals(Urgency.CRITICAL, TriageEngine.triage("namatay, patay na phone").urgency)
+        assertEquals(Urgency.CRITICAL, TriageEngine.triage("hindi na humihinga, patay na phone ko").urgency)
+        assertEquals(Urgency.NEEDS_HELP, TriageEngine.triage("patay na phone ko").urgency)
+    }
+
+    @Test
     fun patayAloneIsNotCriticalButPatayNaAndNamatayAre() {
         assertEquals(Urgency.NEEDS_HELP, TriageEngine.triage("patay").urgency)
         assertEquals(Urgency.NEEDS_HELP, TriageEngine.triage("may patay").urgency)

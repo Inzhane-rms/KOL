@@ -6,10 +6,15 @@ import java.io.File
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import ph.appbuilders.saklolo.contact.ContactRow
+import ph.appbuilders.saklolo.contact.DirectMessage
+import ph.appbuilders.saklolo.contact.DirectStore
 import ph.appbuilders.saklolo.data.MIGRATION_1_2
 import ph.appbuilders.saklolo.data.MIGRATION_2_3
 import ph.appbuilders.saklolo.data.MIGRATION_3_4
+import ph.appbuilders.saklolo.data.MIGRATION_4_5
 import ph.appbuilders.saklolo.data.RoomAlertPersistence
+import ph.appbuilders.saklolo.data.RoomDirectPersistence
 import ph.appbuilders.saklolo.data.RoomGroupPersistence
 import ph.appbuilders.saklolo.data.SakloloDatabase
 import ph.appbuilders.saklolo.group.ConcertGroup
@@ -33,6 +38,7 @@ class SakloloRuntime private constructor(val app: Application) {
     val clipsDir: File = File(app.filesDir, "clips").also { it.mkdirs() }
     val store: AlertStore
     val groupStore: GroupStore
+    val directStore: DirectStore
     val relay: NearbyRelay
 
     private val _alerts = MutableStateFlow<List<Alert>>(emptyList())
@@ -56,25 +62,36 @@ class SakloloRuntime private constructor(val app: Application) {
     private val _activeGroup = MutableStateFlow<ConcertGroup?>(null)
     val activeGroup: StateFlow<ConcertGroup?> = _activeGroup.asStateFlow()
 
+    private val _contacts = MutableStateFlow<List<ContactRow>>(emptyList())
+    val contacts: StateFlow<List<ContactRow>> = _contacts.asStateFlow()
+
+    private val _directMessages = MutableStateFlow<List<DirectMessage>>(emptyList())
+    val directMessages: StateFlow<List<DirectMessage>> = _directMessages.asStateFlow()
+
     init {
         app.getExternalFilesDir(null)?.mkdirs()
         val database = Room.databaseBuilder(app, SakloloDatabase::class.java, "saklolo.db")
             .allowMainThreadQueries()
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
             .fallbackToDestructiveMigration()
             .build()
         store = AlertStore(RoomAlertPersistence(database))
         groupStore = GroupStore(RoomGroupPersistence(database))
+        directStore = DirectStore(RoomDirectPersistence(database))
+        directStore.myId = settings.deviceId
         importLegacyFile()
         _alerts.value = store.snapshot()
         refreshGroups()
+        refreshDirect()
         relay = NearbyRelay(
             context = app,
             store = store,
             groupStore = groupStore,
+            directStore = directStore,
             clipsDir = clipsDir,
             onAlertsChanged = { refreshAlerts() },
             onGroupsChanged = { refreshGroups() },
+            onDirectChanged = { refreshDirect() },
             onStatus = { peers, message ->
                 _peers.value = peers
                 _relayMessage.value = message
@@ -86,7 +103,7 @@ class SakloloRuntime private constructor(val app: Application) {
 
     fun ensureRelay() {
         relay.setFilter(settings.peerFilter())
-        relay.start(settings.deviceName)
+        relay.start(settings.endpointName())
     }
 
     fun noteRelayStartFailed(message: String) {
@@ -98,11 +115,16 @@ class SakloloRuntime private constructor(val app: Application) {
         settings.restrictPeers = restrict
         settings.allowlistRaw = allowlist
         relay.setFilter(PeerFilter(restrict, ph.appbuilders.saklolo.relay.parseAllowlist(allowlist)))
-        relay.start(settings.deviceName)
+        relay.start(settings.endpointName())
     }
 
     fun refreshAlerts() {
         _alerts.value = store.snapshot()
+    }
+
+    fun refreshDirect() {
+        _contacts.value = directStore.rows()
+        _directMessages.value = directStore.visible(settings.deviceId)
     }
 
     fun refreshGroups() {

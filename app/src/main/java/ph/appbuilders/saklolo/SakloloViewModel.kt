@@ -1,6 +1,10 @@
 package ph.appbuilders.saklolo
 
 import android.app.Application
+import android.content.Context
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.media.MediaPlayer
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -14,7 +18,19 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import ph.appbuilders.saklolo.contact.CaptionDisplay
+import ph.appbuilders.saklolo.contact.CallMachine
+import ph.appbuilders.saklolo.contact.CallPhase
+import ph.appbuilders.saklolo.contact.CallState
+import ph.appbuilders.saklolo.contact.ContactQr
+import ph.appbuilders.saklolo.contact.ContactRow
+import ph.appbuilders.saklolo.contact.Conversation
+import ph.appbuilders.saklolo.contact.DirectMessage
+import ph.appbuilders.saklolo.contact.Identity
+import ph.appbuilders.saklolo.contact.Ptt
+import ph.appbuilders.saklolo.contact.VoiceControl
 import ph.appbuilders.saklolo.ask.AskEngine
 import ph.appbuilders.saklolo.ask.AskResult
 import ph.appbuilders.saklolo.ask.AskTurn
@@ -68,6 +84,26 @@ data class VoiceUiState(
     val transcript: String = "",
 )
 
+data class CaptionLine(
+    val id: String,
+    val mine: Boolean,
+    val speaker: String,
+    val text: String,
+    val transcribing: Boolean,
+)
+
+data class CallUi(
+    val phase: CallPhase = CallPhase.IDLE,
+    val peerId: String = "",
+    val peerName: String = "",
+    val speakerOn: Boolean = false,
+    val holding: Boolean = false,
+    val elapsedSec: Int = 0,
+    val playing: Boolean = false,
+    val captions: List<CaptionLine> = emptyList(),
+    val emergency: String? = null,
+)
+
 data class DemoConfig(
     val deviceName: String,
     val restrictPeers: Boolean,
@@ -98,6 +134,8 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     val activeGroup: StateFlow<ConcertGroup?> = runtime.activeGroup
     val peers: StateFlow<List<NearbyPeer>> = runtime.peers
     val relayMessage: StateFlow<String> = runtime.relayMessage
+    val contacts: StateFlow<List<ContactRow>> = runtime.contacts
+    val directMessages: StateFlow<List<DirectMessage>> = runtime.directMessages
 
     private val _voice = MutableStateFlow(VoiceUiState())
     val voice: StateFlow<VoiceUiState> = _voice.asStateFlow()
@@ -105,6 +143,15 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     private var sendVoiceWhenReady = false
     private var voiceEpoch = 0
     private var voiceSession = 0
+    private var voicePeer: String? = null
+    private val threadRead = HashMap<String, Long>()
+    private val playedClips = HashSet<String>()
+    private var call = CallState()
+    private var callFocus: AudioFocusRequest? = null
+    private val _threads = MutableStateFlow<List<Conversation>>(emptyList())
+    val threads: StateFlow<List<Conversation>> = _threads.asStateFlow()
+    private val _call = MutableStateFlow(CallUi())
+    val callUi: StateFlow<CallUi> = _call.asStateFlow()
     private val _chatRead = MutableStateFlow(runtime.settings.lastChatReadMillis)
     val chatReadMillis: StateFlow<Long> = _chatRead.asStateFlow()
 
@@ -120,6 +167,12 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     val notice: StateFlow<String?> = _notice.asStateFlow()
 
     init {
+        viewModelScope.launch {
+            runtime.directMessages.collect {
+                _threads.value = runtime.directStore.conversations(runtime.settings.deviceId, threadRead.toMap())
+                absorbSignals(it)
+            }
+        }
         viewModelScope.launch {
             GemmaSummarizer.loading.collect { loading ->
                 _sos.update { it.copy(gemmaLoading = loading) }
@@ -270,15 +323,13 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         recordGeneration += 1
         undoGeneration += 1
         val ticket = undoGeneration
+        val generation = recordGeneration
         viewModelScope.launch {
-            if (!recordGate.tryLock()) return@launch
-            val pcm = try {
-                if (!_sos.value.recording && !recorder.isRunning) return@launch
+            val pcm = recordGate.withLock {
+                if (generation != recordGeneration || !recorder.isRunning) return@withLock null
                 runtime.relay.onLocalRecordingFinished()
                 recorder.stop()
-            } finally {
-                recordGate.unlock()
-            }
+            } ?: return@launch
             if (ticket != undoGeneration) return@launch
             heldPcm = pcm
             _sos.update {
@@ -309,7 +360,6 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         heldPcm = null
         undoGeneration += 1
         viewModelScope.launch {
-            if (!recordGate.tryLock()) return@launch
             try {
                 _sos.update { it.copy(canUndo = false, recording = false, status = "Transcribing on this phone…", error = null) }
                 finishRecording(pcm)
@@ -317,8 +367,6 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
                 _sos.update {
                     it.copy(status = "Transcription failed", error = error.message ?: "Unknown error")
                 }
-            } finally {
-                recordGate.unlock()
             }
         }
     }
@@ -326,21 +374,23 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     fun stopRecording() {
         heldPcm = null
         undoGeneration += 1
+        val generation = recordGeneration
         viewModelScope.launch {
-            if (!recordGate.tryLock()) return@launch
-            try {
-                if (!_sos.value.recording && !recorder.isRunning) return@launch
+            val pcm = recordGate.withLock {
+                if (generation != recordGeneration) return@withLock null
+                if (!_sos.value.recording && !recorder.isRunning) return@withLock null
                 runtime.relay.onLocalRecordingFinished()
                 _sos.update {
                     it.copy(recording = false, canUndo = false, micLevel = 0f, status = "Transcribing on this phone…", error = null)
                 }
-                finishRecording(recorder.stop())
+                recorder.stop()
+            } ?: return@launch
+            try {
+                finishRecording(pcm)
             } catch (error: Exception) {
                 _sos.update {
                     it.copy(status = "Transcription failed", error = error.message ?: "Unknown error")
                 }
-            } finally {
-                recordGate.unlock()
             }
         }
     }
@@ -491,7 +541,17 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setDisplayName(name: String) {
         runtime.settings.displayName = name
+        runtime.ensureRelay()
     }
+
+    fun deviceId(): String = runtime.settings.deviceId
+
+    fun myQr(): String = ContactQr.encode(deviceId(), displayName())
+
+    fun shortCode(): String = Identity.shortCode(deviceId())
+
+    fun isMine(message: DirectMessage): Boolean =
+        Identity.isMine(message.fromDeviceId, deviceId(), message.localOrigin)
 
     fun createGroup(name: String): String? {
         val trimmed = name.trim()
@@ -528,8 +588,9 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         runtime.refreshGroups()
     }
 
-    fun startVoiceNote() {
-        if (runtime.groupStore.groups().isEmpty()) return
+    fun startVoiceNote(peerId: String? = null) {
+        if (peerId == null && runtime.groupStore.groups().isEmpty()) return
+        voicePeer = peerId
         if (_sos.value.recording || _voice.value.recording) return
         if (!_sos.value.modelReady) {
             _voice.update { it.copy(status = "The speech model is not ready yet.") }
@@ -554,7 +615,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
                 val elapsed = ((System.currentTimeMillis() - recordingStartedAt) / 1000).toInt()
                 _voice.update { it.copy(elapsedSec = elapsed, micLevel = recorder.recentPeak()) }
                 if (generation == recordGeneration && (elapsed >= PcmRecorder.MAX_SECONDS || !recorder.isRunning)) {
-                    stopVoiceNote(sendAfter = false)
+                    stopVoiceNote(sendAfter = voicePeer != null)
                     break
                 }
             }
@@ -566,24 +627,37 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         val epoch = voiceEpoch
         val session = voiceSession
         viewModelScope.launch {
-            if (!recordGate.tryLock()) return@launch
+            val pcm = recordGate.withLock {
+                if (!VoiceControl.shouldStopRecorder(session, voiceSession, recorder.isRunning) &&
+                    !_voice.value.recording
+                ) {
+                    if (sendVoiceWhenReady && epoch == voiceEpoch && session == voiceSession) {
+                        FloatArray(0)
+                    } else {
+                        null
+                    }
+                } else if (!recorder.isRunning) {
+                    null
+                } else {
+                    runtime.relay.onLocalRecordingFinished()
+                    if (session == voiceSession) {
+                        _voice.update { it.copy(recording = false, status = "Transcribing…", transcript = "") }
+                    }
+                    recorder.stop()
+                }
+            }
+            if (pcm == null) return@launch
+            if (pcm.isEmpty()) {
+                if (sendVoiceWhenReady && epoch == voiceEpoch && session == voiceSession) commitPendingVoice()
+                return@launch
+            }
             try {
-                if (!_voice.value.recording && !recorder.isRunning) {
-                    if (sendVoiceWhenReady && epoch == voiceEpoch && session == voiceSession) commitPendingVoice()
-                    return@launch
-                }
-                runtime.relay.onLocalRecordingFinished()
-                if (session == voiceSession) {
-                    _voice.update { it.copy(recording = false, status = "Transcribing…", transcript = "") }
-                }
-                finishVoice(recorder.stop(), epoch, session)
+                finishVoice(pcm, epoch, session)
             } catch (error: Exception) {
                 if (session == voiceSession) {
                     sendVoiceWhenReady = false
                     _voice.update { it.copy(recording = false, status = error.message ?: "Transcription failed") }
                 }
-            } finally {
-                recordGate.unlock()
             }
         }
     }
@@ -604,19 +678,26 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         sendVoiceWhenReady = false
         voiceEpoch += 1
         recordGeneration += 1
+        val session = voiceSession
         val clip = pendingVoice?.audioPath
         pendingVoice = null
         if (!clip.isNullOrBlank()) File(clip).delete()
-        _voice.value = VoiceUiState()
+        val current = ph.appbuilders.saklolo.group.VoiceSheet(
+            session = voiceSession,
+            recording = _voice.value.recording,
+            status = _voice.value.status,
+            transcript = _voice.value.transcript,
+        )
+        val next = ph.appbuilders.saklolo.group.VoiceDraft.afterDiscard(session, current)
+        if (next.session == current.session && next.transcript.isEmpty() && !next.recording && next.status.isEmpty()) {
+            _voice.value = VoiceUiState()
+        }
         viewModelScope.launch {
-            if (!recordGate.tryLock()) return@launch
-            try {
-                if (recorder.isRunning) {
+            recordGate.withLock {
+                if (VoiceControl.shouldStopRecorder(session, voiceSession, recorder.isRunning)) {
                     runtime.relay.onLocalRecordingFinished()
                     recorder.stop()
                 }
-            } finally {
-                recordGate.unlock()
             }
         }
     }
@@ -697,10 +778,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
             }
             is VoiceDraft.Finish.Keep -> {
                 if (session != voiceSession) return
-                val group = runtime.groupStore.active() ?: run {
-                    sendVoiceWhenReady = false
-                    return
-                }
+                val peer = voicePeer
                 val location = DeviceLocation.lastKnown(getApplication())
                 val id = java.util.UUID.randomUUID().toString()
                 val file = WavPcm.clipFile(runtime.clipsDir, id)
@@ -713,6 +791,21 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
                     return
                 }
                 val audioPath = if (file.exists() && file.length() > WavPcm.HEADER_BYTES) file.absolutePath else null
+                if (peer != null) {
+                    if (session != voiceSession) {
+                        file.delete()
+                        return
+                    }
+                    sendDirect(peer, decision.body.take(800), kind = "voice", audioPath = audioPath)
+                    voicePeer = null
+                    _voice.value = VoiceUiState()
+                    return
+                }
+                val group = runtime.groupStore.active() ?: run {
+                    sendVoiceWhenReady = false
+                    file.delete()
+                    return
+                }
                 pendingVoice = GroupNote(
                     id = id,
                     groupId = group.id,
@@ -773,16 +866,22 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun ingestQr(payload: String) {
-        val group = GroupQr.decode(payload)
-        if (group != null) {
-            runtime.groupStore.join(group.id, group.name, System.currentTimeMillis())
-            runtime.refreshGroups()
-            _notice.value = "Joined ${group.name}"
+        val contact = ContactQr.decode(payload)
+        if (contact != null) {
+            if (contact.deviceId == deviceId()) {
+                _notice.value = "That's your own code"
+                return
+            }
+            viewModelScope.launch(Dispatchers.IO) {
+                runtime.directStore.saveQr(contact.deviceId, contact.name, System.currentTimeMillis())
+                runtime.refreshDirect()
+                _notice.value = "Added ${contact.name}"
+            }
             return
         }
         val alert = QrCodec.decode(payload)
         if (alert == null) {
-            _notice.value = "That QR is not a B-LINK code"
+            _notice.value = "That QR is not a B-LINK contact code"
             return
         }
         val fresh = store.ingest(listOf(alert))
@@ -838,6 +937,367 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
             }
         } catch (error: Exception) {
             _sos.update { it.copy(error = error.message ?: "Could not play the voice clip") }
+        }
+    }
+
+    fun toggleFavorite(deviceId: String) {
+        val row = runtime.directStore.rows().firstOrNull { it.deviceId == deviceId } ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            runtime.directStore.setFavorite(deviceId, !row.favorite)
+            runtime.refreshDirect()
+        }
+    }
+
+    fun removeContact(deviceId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runtime.directStore.remove(deviceId)
+            runtime.refreshDirect()
+            _notice.value = "Contact removed"
+        }
+    }
+
+    fun markThreadRead(peerId: String) {
+        threadRead[peerId] = System.currentTimeMillis()
+        _threads.value = runtime.directStore.conversations(deviceId(), threadRead.toMap())
+    }
+
+    fun sendDirect(to: String, body: String, kind: String = "text", audioPath: String? = null) {
+        val trimmed = body.trim()
+        if (to.isBlank() || (trimmed.isEmpty() && kind == "text")) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val message = DirectMessage(
+                id = java.util.UUID.randomUUID().toString(),
+                fromDeviceId = deviceId(),
+                toDeviceId = to,
+                senderName = displayName(),
+                body = trimmed.ifEmpty { kind },
+                createdAtMillis = System.currentTimeMillis(),
+                kind = kind,
+                audioPath = audioPath,
+            )
+            runtime.directStore.addLocal(message)
+            runtime.relay.broadcastDirect(message)
+            runtime.refreshDirect()
+        }
+    }
+
+    fun sendPing(peerId: String) {
+        sendDirect(peerId, "Ping", kind = "ping")
+    }
+
+    fun placeCall(peerId: String) {
+        val row = runtime.directStore.rows().firstOrNull { it.deviceId == peerId } ?: return
+        if (!row.inRange) {
+            _notice.value = "Not in range right now"
+            return
+        }
+        call = CallMachine.inviteOut(peerId, row.name)
+        routeCallAudio(speaker = false)
+        sendDirect(peerId, "Call", kind = Ptt.INVITE)
+        publishCall(emergency = null)
+    }
+
+    fun acceptCall() {
+        val peer = call.peerId
+        if (peer.isBlank()) return
+        handledSignals += openInviteIds(peer)
+        call = CallMachine.accept(call)
+        routeCallAudio(speaker = false)
+        sendDirect(peer, "Accept", kind = Ptt.ACCEPT)
+        publishCall(emergency = null)
+    }
+
+    fun declineCall() {
+        val peer = call.peerId
+        if (peer.isNotBlank()) {
+            handledSignals += openInviteIds(peer)
+            sendDirect(peer, "Decline", kind = Ptt.DECLINE)
+        }
+        call = CallMachine.decline(call)
+        releaseCallAudio()
+        publishCall(emergency = null)
+    }
+
+    fun endCall() {
+        val peer = call.peerId
+        if (peer.isNotBlank() && call.phase == CallPhase.ACTIVE) {
+            sendDirect(peer, "End", kind = Ptt.END)
+        }
+        if (_call.value.holding) stopHold()
+        call = CallMachine.end(call)
+        releaseCallAudio()
+        publishCall(emergency = null)
+    }
+
+    fun setSpeaker(on: Boolean) {
+        if (call.phase != CallPhase.ACTIVE && call.phase != CallPhase.OUTGOING) return
+        routeCallAudio(on)
+        publishCall()
+    }
+
+    fun dismissEmergency() {
+        runtime.directStore.thread(deviceId(), call.peerId)
+            .filter { it.kind == Ptt.CLIP && Ptt.emergency(it.body) }
+            .forEach { dismissedEmergency += it.id }
+        publishCall(emergency = null)
+    }
+
+    fun sendCallSos() {
+        val words = _call.value.emergency?.trim().orEmpty().ifBlank {
+            _call.value.captions.lastOrNull { !it.transcribing }?.text.orEmpty()
+        }
+        sendSosText(words)
+    }
+
+    fun sendSosText(words: String) {
+        if (words.isBlank()) return
+        val result = TriageEngine.triage(words)
+        val id = java.util.UUID.randomUUID().toString()
+        val alert = Alert(
+            id = id,
+            transcript = words.take(800),
+            summary = result.summary.take(180),
+            urgency = result.urgency,
+            createdAtMillis = System.currentTimeMillis(),
+            hops = 0,
+            language = _sos.value.language.name,
+        )
+        store.addLocal(alert)
+        store.markDelivered(id, relay.broadcast(alert))
+        runtime.refreshAlerts()
+        _notice.value = "SOS sent"
+    }
+
+    fun startHold() {
+        if (!CallMachine.canHold(call)) return
+        if (_sos.value.recording || _voice.value.recording || recorder.isRunning) return
+        if (!_sos.value.modelReady) {
+            _notice.value = "The speech model is not ready yet."
+            return
+        }
+        holdSession += 1
+        val session = holdSession
+        val failure = recorder.start()
+        if (failure != null) {
+            _notice.value = failure
+            return
+        }
+        holdStartedAt = System.currentTimeMillis()
+        holding = true
+        transcribingHold = false
+        publishCall()
+        viewModelScope.launch {
+            while (recorder.isRunning && holding && session == holdSession) {
+                delay(200)
+                holdElapsed = ((System.currentTimeMillis() - holdStartedAt) / 1000).toInt()
+                publishCall()
+                if (holdElapsed >= Ptt.MAX_SECONDS) {
+                    stopHold()
+                    break
+                }
+            }
+        }
+    }
+
+    fun stopHold() {
+        if (!holding && !recorder.isRunning) return
+        val session = holdSession
+        val peer = call.peerId
+        holding = false
+        holdElapsed = 0
+        publishCall()
+        viewModelScope.launch {
+            val pcm = recordGate.withLock {
+                if (session != holdSession) return@withLock null
+                if (!recorder.isRunning) return@withLock null
+                runtime.relay.onLocalRecordingFinished()
+                recorder.stop()
+            } ?: return@launch
+            transcribingHold = true
+            publishCall()
+            val engine = transcriber
+            val text = if (engine == null || pcm.size < PcmRecorder.SAMPLE_RATE / 2) {
+                ""
+            } else {
+                withContext(Dispatchers.Default) {
+                    engine.transcribe(pcm, _sos.value.language.whisperCode)
+                }
+            }
+            if (session != holdSession) return@launch
+            transcribingHold = false
+            val body = text.trim()
+            if (body.isNotEmpty() && peer.isNotBlank()) {
+                val id = java.util.UUID.randomUUID().toString()
+                val file = WavPcm.clipFile(runtime.clipsDir, id)
+                WavPcm.write(file, pcm)
+                val audioPath = if (file.exists() && file.length() > WavPcm.HEADER_BYTES) file.absolutePath else null
+                val message = DirectMessage(
+                    id = id,
+                    fromDeviceId = deviceId(),
+                    toDeviceId = peer,
+                    senderName = displayName(),
+                    body = body.take(800),
+                    createdAtMillis = System.currentTimeMillis(),
+                    kind = Ptt.CLIP,
+                    audioPath = audioPath,
+                )
+                withContext(Dispatchers.IO) {
+                    runtime.directStore.addLocal(message)
+                    runtime.relay.broadcastDirect(message)
+                    runtime.refreshDirect()
+                }
+                if (Ptt.emergency(body)) publishCall(emergency = body)
+            }
+            publishCall()
+        }
+    }
+
+    private val handledSignals = HashSet<String>()
+    private val dismissedEmergency = HashSet<String>()
+    private var holding = false
+    private var transcribingHold = false
+    private var holdElapsed = 0
+    private var holdSession = 0
+    private var holdStartedAt = 0L
+
+    private fun absorbSignals(messages: List<DirectMessage>) {
+        val myId = deviceId()
+        for (message in messages.sortedBy { it.createdAtMillis }) {
+            if (message.kind !in setOf(Ptt.INVITE, Ptt.ACCEPT, Ptt.DECLINE, Ptt.END, Ptt.CLIP)) continue
+            if (message.toDeviceId != myId) continue
+            if (message.id in handledSignals && message.kind != Ptt.CLIP) continue
+            when (message.kind) {
+                Ptt.INVITE -> {
+                    if (System.currentTimeMillis() - message.createdAtMillis > 120_000) {
+                        handledSignals += message.id
+                    } else {
+                        call = CallMachine.inviteIn(call, message.fromDeviceId, message.senderName)
+                    }
+                }
+                Ptt.ACCEPT, Ptt.DECLINE, Ptt.END -> {
+                    call = CallMachine.remoteSignal(call, message, myId)
+                    handledSignals += message.id
+                }
+                Ptt.CLIP -> {
+                    if (
+                        call.phase == CallPhase.ACTIVE &&
+                        message.fromDeviceId == call.peerId &&
+                        message.id !in playedClips
+                    ) {
+                        playedClips += message.id
+                        val path = message.audioPath
+                        if (!path.isNullOrBlank()) {
+                            call = call.copy(playing = true)
+                            playCallClip(path)
+                        }
+                    }
+                }
+            }
+        }
+        val emergency = if (call.phase == CallPhase.ACTIVE) {
+            runtime.directStore.thread(myId, call.peerId)
+                .filter { it.kind == Ptt.CLIP && it.id !in dismissedEmergency }
+                .lastOrNull { Ptt.emergency(it.body) }
+                ?.body
+        } else {
+            null
+        }
+        publishCall(emergency)
+    }
+
+    private fun openInviteIds(peerId: String): List<String> =
+        runtime.directMessages.value.filter {
+            it.kind == Ptt.INVITE && it.fromDeviceId == peerId && it.toDeviceId == deviceId()
+        }.map { it.id }
+
+    private fun publishCall(emergency: String? = _call.value.emergency) {
+        val peer = call.peerId
+        val captions = if (peer.isBlank()) {
+            emptyList()
+        } else {
+            val lines = runtime.directStore.thread(deviceId(), peer)
+                .filter { it.kind == Ptt.CLIP }
+                .takeLast(if (transcribingHold) 2 else 3)
+                .map { message ->
+                    val mine = isMine(message)
+                    CaptionLine(
+                        id = message.id,
+                        mine = mine,
+                        speaker = if (mine) "You" else message.senderName,
+                        text = CaptionDisplay.text(message.body),
+                        transcribing = false,
+                    )
+                }
+            if (transcribingHold) {
+                lines + CaptionLine(id = "live", mine = true, speaker = "You", text = "Transcribing…", transcribing = true)
+            } else {
+                lines
+            }
+        }
+        _call.value = CallUi(
+            phase = call.phase,
+            peerId = peer,
+            peerName = call.peerName.ifBlank { peer },
+            speakerOn = call.speakerOn,
+            holding = holding,
+            elapsedSec = holdElapsed,
+            playing = call.playing,
+            captions = captions,
+            emergency = emergency,
+        )
+    }
+
+    private fun routeCallAudio(speaker: Boolean) {
+        val audio = getApplication<Application>().getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        audio.mode = AudioManager.MODE_IN_COMMUNICATION
+        audio.isSpeakerphoneOn = speaker
+        val attrs = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+            .build()
+        val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+            .setAudioAttributes(attrs)
+            .build()
+        callFocus = request
+        audio.requestAudioFocus(request)
+        call = call.copy(speakerOn = speaker)
+    }
+
+    private fun releaseCallAudio() {
+        val audio = getApplication<Application>().getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        callFocus?.let { audio.abandonAudioFocusRequest(it) }
+        callFocus = null
+        audio.isSpeakerphoneOn = false
+        audio.mode = AudioManager.MODE_NORMAL
+        call = call.copy(playing = false, speakerOn = false)
+    }
+
+    private fun playCallClip(path: String) {
+        val file = File(path)
+        if (!file.exists()) {
+            call = call.copy(playing = false)
+            return
+        }
+        try {
+            player?.release()
+            val attrs = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build()
+            player = MediaPlayer().apply {
+                setAudioAttributes(attrs)
+                setDataSource(file.absolutePath)
+                setOnCompletionListener {
+                    it.release()
+                    if (player === it) player = null
+                    call = call.copy(playing = false)
+                    publishCall()
+                }
+                prepare()
+                start()
+            }
+        } catch (_: Exception) {
+            call = call.copy(playing = false)
         }
     }
 

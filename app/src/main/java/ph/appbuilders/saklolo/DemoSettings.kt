@@ -2,6 +2,10 @@ package ph.appbuilders.saklolo
 
 import android.content.Context
 import android.os.Build
+import java.util.UUID
+import ph.appbuilders.saklolo.contact.ContactQr
+import ph.appbuilders.saklolo.contact.EndpointCard
+import ph.appbuilders.saklolo.contact.Identity
 import ph.appbuilders.saklolo.relay.PeerFilter
 import ph.appbuilders.saklolo.relay.parseAllowlist
 import ph.appbuilders.saklolo.stt.SpeechLanguage
@@ -15,11 +19,30 @@ class DemoSettings(context: Context) {
             prefs.edit().putString(KEY_NAME, value.trim().ifEmpty { "B-LINK" }).apply()
         }
 
-    var displayName: String
-        get() = prefs.getString(KEY_DISPLAY, null)?.trim()?.takeIf { it.isNotEmpty() } ?: "Me"
-        set(value) {
-            prefs.edit().putString(KEY_DISPLAY, value.trim().ifEmpty { "Me" }).apply()
+    val deviceId: String
+        get() {
+            val existing = prefs.getString(KEY_DEVICE, null)?.trim().orEmpty()
+            if (ContactQr.validId(existing)) return existing
+            val created = UUID.randomUUID().toString()
+            prefs.edit().putString(KEY_DEVICE, created).apply()
+            return created
         }
+
+    var displayName: String
+        get() {
+            val stored = prefs.getString(KEY_DISPLAY, null)?.trim().orEmpty()
+            if (stored.isNotEmpty() && stored != "Me") return stored
+            val generated = Identity.defaultName(Build.MODEL ?: "Phone", deviceId)
+            prefs.edit().putString(KEY_DISPLAY, generated).apply()
+            return generated
+        }
+        set(value) {
+            val trimmed = value.trim().replace("|", " ").take(40)
+            val fallback = Identity.defaultName(Build.MODEL ?: "Phone", deviceId)
+            prefs.edit().putString(KEY_DISPLAY, trimmed.ifEmpty { fallback }).apply()
+        }
+
+    fun endpointName(): String = EndpointCard.encode(deviceId, displayName)
 
     var lastChatReadMillis: Long
         get() = prefs.getLong(KEY_CHAT_READ, 0L)
@@ -51,6 +74,7 @@ class DemoSettings(context: Context) {
 
     companion object {
         private const val KEY_NAME = "name"
+        private const val KEY_DEVICE = "device_id"
         private const val KEY_DISPLAY = "display_name"
         private const val KEY_CHAT_READ = "chat_read"
         private const val KEY_RESTRICT = "restrict"

@@ -11,6 +11,10 @@ import androidx.room.RoomDatabase
 import androidx.room.Transaction
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import ph.appbuilders.saklolo.contact.DirectMessage
+import ph.appbuilders.saklolo.contact.DirectPersistence
+import ph.appbuilders.saklolo.contact.DirectSnapshot
+import ph.appbuilders.saklolo.contact.SavedContact
 import ph.appbuilders.saklolo.group.ConcertGroup
 import ph.appbuilders.saklolo.group.GroupNote
 import ph.appbuilders.saklolo.group.GroupPersistence
@@ -132,19 +136,96 @@ interface GroupDao {
     }
 }
 
+@Entity(tableName = "contacts")
+data class ContactEntity(
+    @PrimaryKey val deviceId: String,
+    val name: String,
+    val addedAtMillis: Long,
+    val favorite: Boolean,
+    val lastHeardMillis: Long,
+    val saved: Boolean,
+)
+
+@Entity(tableName = "direct_messages")
+data class DirectEntity(
+    @PrimaryKey val id: String,
+    val fromDeviceId: String,
+    val toDeviceId: String,
+    val senderName: String,
+    val body: String,
+    val createdAtMillis: Long,
+    val hops: Int,
+    val kind: String,
+    val audioPath: String?,
+    val localOrigin: Boolean,
+)
+
+@Dao
+interface DirectDao {
+    @Query("SELECT * FROM contacts")
+    fun contacts(): List<ContactEntity>
+
+    @Query("SELECT * FROM direct_messages")
+    fun messages(): List<DirectEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    fun insertContacts(rows: List<ContactEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    fun insertMessages(rows: List<DirectEntity>)
+
+    @Query("DELETE FROM contacts")
+    fun deleteContacts()
+
+    @Query("DELETE FROM direct_messages")
+    fun deleteMessages()
+
+    @Transaction
+    fun replaceAll(contacts: List<ContactEntity>, messages: List<DirectEntity>) {
+        deleteContacts()
+        deleteMessages()
+        if (contacts.isNotEmpty()) insertContacts(contacts)
+        if (messages.isNotEmpty()) insertMessages(messages)
+    }
+}
+
 @Database(
-    entities = [AlertEntity::class, GroupEntity::class, NoteEntity::class, SightingEntity::class],
-    version = 4,
+    entities = [
+        AlertEntity::class,
+        GroupEntity::class,
+        NoteEntity::class,
+        SightingEntity::class,
+        ContactEntity::class,
+        DirectEntity::class,
+    ],
+    version = 5,
     exportSchema = false,
 )
 abstract class SakloloDatabase : RoomDatabase() {
     abstract fun alerts(): AlertDao
     abstract fun groups(): GroupDao
+    abstract fun direct(): DirectDao
 }
 
 val MIGRATION_1_2 = object : Migration(1, 2) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE alerts ADD COLUMN responding INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS contacts (" +
+                "deviceId TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL, addedAtMillis INTEGER NOT NULL, " +
+                "favorite INTEGER NOT NULL, lastHeardMillis INTEGER NOT NULL, saved INTEGER NOT NULL)",
+        )
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS direct_messages (" +
+                "id TEXT NOT NULL PRIMARY KEY, fromDeviceId TEXT NOT NULL, toDeviceId TEXT NOT NULL, " +
+                "senderName TEXT NOT NULL, body TEXT NOT NULL, createdAtMillis INTEGER NOT NULL, hops INTEGER NOT NULL, " +
+                "kind TEXT NOT NULL, audioPath TEXT, localOrigin INTEGER NOT NULL)",
+        )
     }
 }
 
@@ -268,6 +349,55 @@ private fun AlertEntity.toAlert() = Alert(
     deliveredCount = deliveredCount,
     responding = responding,
 )
+
+class RoomDirectPersistence(private val database: SakloloDatabase) : DirectPersistence {
+    override val async: Boolean = true
+
+    override fun load(): DirectSnapshot {
+        val dao = database.direct()
+        return DirectSnapshot(
+            contacts = dao.contacts().map {
+                SavedContact(it.deviceId, it.name, it.addedAtMillis, it.favorite, it.lastHeardMillis, it.saved)
+            },
+            messages = dao.messages().map {
+                DirectMessage(
+                    id = it.id,
+                    fromDeviceId = it.fromDeviceId,
+                    toDeviceId = it.toDeviceId,
+                    senderName = it.senderName,
+                    body = it.body,
+                    createdAtMillis = it.createdAtMillis,
+                    hops = it.hops,
+                    kind = it.kind,
+                    audioPath = it.audioPath,
+                    localOrigin = it.localOrigin,
+                )
+            },
+        )
+    }
+
+    override fun save(snapshot: DirectSnapshot) {
+        database.direct().replaceAll(
+            snapshot.contacts.map {
+                ContactEntity(it.deviceId, it.name, it.addedAtMillis, it.favorite, it.lastHeardMillis, it.saved)
+            },
+            snapshot.messages.map {
+                DirectEntity(
+                    id = it.id,
+                    fromDeviceId = it.fromDeviceId,
+                    toDeviceId = it.toDeviceId,
+                    senderName = it.senderName,
+                    body = it.body,
+                    createdAtMillis = it.createdAtMillis,
+                    hops = it.hops,
+                    kind = it.kind,
+                    audioPath = it.audioPath,
+                    localOrigin = it.localOrigin,
+                )
+            },
+        )
+    }
+}
 
 private fun Alert.toEntity(localOrigin: Boolean) = AlertEntity(
     id = id,

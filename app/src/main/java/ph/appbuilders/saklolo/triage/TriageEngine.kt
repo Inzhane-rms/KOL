@@ -106,7 +106,7 @@ object TriageEngine {
         listOf("heart", "attack"),
         listOf("atake", "sa", "puso"),
         listOf("crowd", "crush"),
-        listOf("patay", "na"),
+        listOf("patay", "na", "siya"),
     )
     /** A dead light, power, phone, or mic. Not a person. */
     private val patayDeviceWords = setOf(
@@ -149,12 +149,10 @@ object TriageEngine {
         val drowning = hasUnnegated(tokens, drownWords)
         val notBreathing = hasWordsBetween(tokens, "hindi", "humihinga", maxBetween = 2) ||
             hasWordsBetween(tokens, "di", "humihinga", maxBetween = 2)
-        val deathPhrases = if (patayRefersToDevice(tokens)) {
-            severePhrases.filter { it != listOf("patay", "na") }
-        } else {
-            severePhrases
-        }
-        val severe = hasUnnegated(tokens, severeWords) || hasPhrase(tokens, deathPhrases) || notBreathing
+        val severe = hasUnnegated(tokens, severeWords) ||
+            hasPhrase(tokens, severePhrases) ||
+            unblockedPatayNa(tokens) ||
+            notBreathing
         val flood = hasUnnegated(tokens, floodWords)
         val crowd = hasUnnegated(tokens, crowdWords) || hasPhrase(tokens, crowdPhrases)
         val help = hasUnnegated(tokens, helpWords) || flood || negatedSafe(tokens) || crowd
@@ -315,15 +313,22 @@ object TriageEngine {
         return false
     }
 
-    /** "patay" or "patay na" plus a device within two words is ordinary, not a death. */
-    private fun patayRefersToDevice(tokens: List<String>): Boolean {
-        for (index in tokens.indices) {
-            if (tokens[index] != "patay") continue
-            val first = if (tokens.getOrNull(index + 1) == "na") index + 2 else index + 1
-            if (first > tokens.lastIndex) continue
-            val last = minOf(tokens.lastIndex, first + 1)
-            for (cursor in first..last) {
-                if (tokens[cursor] in patayDeviceWords) return true
+    /**
+     * Each "patay na" is judged on its own. A device word in the next two tokens
+     * makes that occurrence ordinary. A later "patay na siya" in the same line stays critical.
+     */
+    private fun unblockedPatayNa(tokens: List<String>): Boolean {
+        var index = 0
+        while (index < tokens.size - 1) {
+            if (tokens[index] == "patay" && tokens[index + 1] == "na") {
+                val first = index + 2
+                val last = minOf(tokens.lastIndex, first + 1)
+                val device = first <= tokens.lastIndex &&
+                    (first..last).any { tokens[it] in patayDeviceWords }
+                if (!device) return true
+                index += 2
+            } else {
+                index++
             }
         }
         return false
