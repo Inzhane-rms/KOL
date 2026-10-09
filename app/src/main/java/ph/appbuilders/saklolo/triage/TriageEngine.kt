@@ -50,12 +50,12 @@ object TriageEngine {
     )
 
     private val trappedWords = setOf(
-        "naipit", "napiit", "nakulong", "nakakulong", "trapped", "stuck", "buried", "pinned",
+        "naipit", "naiipit", "ipit", "napiit", "nakulong", "nakakulong", "trapped", "stuck", "buried", "pinned",
     )
 
     private val injuredWords = setOf(
         "nasugatan", "sugatan", "sugat", "nasamdan", "samdan", "injured", "bleeding",
-        "dumudugo", "nagdugo", "unconscious", "nahimatay", "himalatyon", "injury", "injuries",
+        "dumudugo", "nagdudugo", "dumugo", "nagdugo", "unconscious", "nahimatay", "himalatyon", "injury", "injuries",
     )
 
     private val fireWords = setOf("sunog", "nasusunog", "nagdilaab", "fire", "apoy")
@@ -133,7 +133,9 @@ object TriageEngine {
         val injured = hasUnnegated(tokens, injuredWords)
         val fire = hasUnnegated(tokens, fireWords)
         val drowning = hasUnnegated(tokens, drownWords)
-        val severe = hasUnnegated(tokens, severeWords) || hasPhrase(tokens, severePhrases)
+        val notBreathing = hasWordsBetween(tokens, "hindi", "humihinga", maxBetween = 2) ||
+            hasWordsBetween(tokens, "di", "humihinga", maxBetween = 2)
+        val severe = hasUnnegated(tokens, severeWords) || hasPhrase(tokens, severePhrases) || notBreathing
         val flood = hasUnnegated(tokens, floodWords)
         val help = hasUnnegated(tokens, helpWords) || flood || negatedSafe(tokens)
         val safe = affirmativeSafe(tokens)
@@ -295,6 +297,18 @@ object TriageEngine {
 
     private fun hasPhrase(tokens: List<String>, phrases: List<List<String>>): Boolean =
         indexOfAnyPhrase(tokens, phrases) != null
+
+    /** [start] and [end] with at most [maxBetween] tokens between them, in that order. */
+    private fun hasWordsBetween(tokens: List<String>, start: String, end: String, maxBetween: Int): Boolean {
+        for (index in tokens.indices) {
+            if (tokens[index] != start) continue
+            val last = minOf(tokens.lastIndex, index + 1 + maxBetween)
+            for (cursor in (index + 1)..last) {
+                if (tokens[cursor] == end) return true
+            }
+        }
+        return false
+    }
 
     private fun indexOfAnyPhrase(tokens: List<String>, phrases: List<List<String>>): Int? {
         for (phrase in phrases) {

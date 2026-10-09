@@ -80,11 +80,9 @@ fun AskScreen(
     }
 
     LaunchedEffect(seed) {
-        val text = seed?.trim().orEmpty()
-        if (text.isNotEmpty()) {
-            draft = text
-            onSeedConsumed()
-        }
+        val text = questionToAutoSend(seed) ?: return@LaunchedEffect
+        ask(text)
+        onSeedConsumed()
     }
 
     LaunchedEffect(turns.size) {
@@ -126,6 +124,10 @@ fun AskScreen(
         )
     }
 }
+
+/** Topic-card text that should be sent as soon as Ask opens. Blank seeds are ignored. */
+internal fun questionToAutoSend(seed: String?): String? =
+    seed?.trim()?.takeIf { it.isNotEmpty() }
 
 @Composable
 private fun SuggestionRow(suggestions: List<ph.appbuilders.saklolo.ask.AskSuggestion>, onAsk: (String) -> Unit) {

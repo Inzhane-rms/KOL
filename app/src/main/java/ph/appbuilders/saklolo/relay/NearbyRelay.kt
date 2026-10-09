@@ -71,6 +71,12 @@ class NearbyRelay(
         endpoints.setFilter(filter)
     }
 
+    /** Foreground start failed before or during [start]. The next start is a fresh one. */
+    fun noteServiceStartFailed(message: String) {
+        endpoints.noteStartFailed()
+        publish(message)
+    }
+
     fun peers(): List<NearbyPeer> = endpoints.snapshot()
 
     fun broadcast(alert: Alert): Int = send(listOf(alert), exceptEndpoint = null, forceClips = true)

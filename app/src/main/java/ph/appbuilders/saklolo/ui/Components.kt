@@ -10,7 +10,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -51,7 +52,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import kotlinx.coroutines.CancellationException
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -222,17 +225,41 @@ fun SosOrb(
                     Brush.radialGradient(listOf(Color(0xFFFF4B4B), Accent, Color(0xFFB5161C))),
                 )
                 .pointerInput(Unit) {
-                    detectTapGestures(
-                        onPress = {
-                            if (enabledNow || recordingNow) {
-                                pressed = true
-                                if (!recordingNow) startNow()
-                                tryAwaitRelease()
-                                pressed = false
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        if (!(enabledNow || recordingNow)) return@awaitEachGesture
+                        down.consume()
+                        pressed = true
+                        if (!recordingNow) startNow()
+                        val width = size.width.toFloat()
+                        val height = size.height.toFloat()
+                        try {
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Main)
+                                event.changes.forEach { it.consume() }
+                                val change = event.changes.firstOrNull { it.id == down.id }
+                                if (change == null) {
+                                    if (shouldEndSosHold(pointerPressed = true, outOfBounds = false, cancelled = true)) {
+                                        break
+                                    }
+                                    continue
+                                }
+                                val outside = change.position.x < 0f ||
+                                    change.position.y < 0f ||
+                                    change.position.x > width ||
+                                    change.position.y > height
+                                if (shouldEndSosHold(change.pressed, outside, cancelled = false)) break
+                            }
+                        } catch (cancelled: CancellationException) {
+                            pressed = false
+                            if (shouldEndSosHold(pointerPressed = true, outOfBounds = false, cancelled = true)) {
                                 endNow()
                             }
-                        },
-                    )
+                            throw cancelled
+                        }
+                        pressed = false
+                        endNow()
+                    }
                 },
             contentAlignment = Alignment.Center,
         ) {

@@ -65,6 +65,10 @@ class SakloloRuntime private constructor(val app: Application) {
         relay.start(settings.deviceName)
     }
 
+    fun noteRelayStartFailed(message: String) {
+        relay.noteServiceStartFailed(message)
+    }
+
     fun applyDemo(name: String, restrict: Boolean, allowlist: String) {
         settings.deviceName = name
         settings.restrictPeers = restrict

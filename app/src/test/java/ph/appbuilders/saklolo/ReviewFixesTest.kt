@@ -14,9 +14,14 @@ import ph.appbuilders.saklolo.relay.ClipRelay
 import ph.appbuilders.saklolo.relay.PeerFilter
 import ph.appbuilders.saklolo.relay.RelayEndpoints
 import ph.appbuilders.saklolo.relay.RelayPermissions
+import ph.appbuilders.saklolo.relay.isForegroundStartNotAllowed
 import ph.appbuilders.saklolo.relay.parseAllowlist
+import ph.appbuilders.saklolo.relay.relayStartFailureMessage
+import ph.appbuilders.saklolo.relay.runRelayServiceStart
 import ph.appbuilders.saklolo.stt.SpeechLanguage
 import ph.appbuilders.saklolo.triage.SummaryRefine
+import ph.appbuilders.saklolo.ui.questionToAutoSend
+import ph.appbuilders.saklolo.ui.shouldEndSosHold
 
 class ReviewFixesTest {
     @Test
@@ -184,5 +189,80 @@ class ReviewFixesTest {
         assertEquals(16_000, header.int)
         header.position(34)
         assertEquals(16, header.short.toInt())
+    }
+
+    @Test
+    fun relayStartFailureDoesNotEscape() {
+        var ensured = false
+        var failure: Throwable? = null
+        val security = runRelayServiceStart(
+            startForeground = { throw SecurityException("background") },
+            ensureRelay = { ensured = true },
+            onFailure = { failure = it },
+        )
+        assertFalse(security)
+        assertFalse(ensured)
+        assertTrue(failure is SecurityException)
+        assertTrue(relayStartFailureMessage(failure!!).contains("security"))
+        assertTrue(relayStartFailureMessage(failure!!).contains("background"))
+
+        failure = null
+        val blocked = foregroundStartNotAllowed("not allowed")
+        assertTrue(isForegroundStartNotAllowed(blocked))
+        val foreground = runRelayServiceStart(
+            startForeground = { throw blocked },
+            ensureRelay = { error("relay must not start") },
+            onFailure = { failure = it },
+        )
+        assertFalse(foreground)
+        assertTrue(relayStartFailureMessage(failure!!).contains("foreground-not-allowed"))
+
+        failure = null
+        val other = runRelayServiceStart(
+            startForeground = { },
+            ensureRelay = { throw IllegalStateException("nearby down") },
+            onFailure = { failure = it },
+        )
+        assertFalse(other)
+        assertTrue(relayStartFailureMessage(failure!!).contains("nearby down"))
+    }
+
+    @Test
+    fun relayStartSuccessLeavesFailureUnset() {
+        var foreground = 0
+        var ensured = 0
+        var failed = false
+        val started = runRelayServiceStart(
+            startForeground = { foreground++ },
+            ensureRelay = { ensured++ },
+            onFailure = { failed = true },
+        )
+        assertTrue(started)
+        assertEquals(1, foreground)
+        assertEquals(1, ensured)
+        assertFalse(failed)
+    }
+
+    @Test
+    fun slidingOffTheSosButtonDoesNotEndTheHold() {
+        assertFalse(shouldEndSosHold(pointerPressed = true, outOfBounds = false, cancelled = false))
+        assertFalse(shouldEndSosHold(pointerPressed = true, outOfBounds = true, cancelled = false))
+        assertTrue(shouldEndSosHold(pointerPressed = false, outOfBounds = false, cancelled = false))
+        assertTrue(shouldEndSosHold(pointerPressed = false, outOfBounds = true, cancelled = false))
+        assertTrue(shouldEndSosHold(pointerPressed = true, outOfBounds = true, cancelled = true))
+    }
+
+    @Test
+    fun topicSeedIsSentRatherThanLeftInTheDraft() {
+        assertEquals("nagdudugo", questionToAutoSend("  nagdudugo  "))
+        assertEquals("Baha sa bahay, ano ang gagawin?", questionToAutoSend("Baha sa bahay, ano ang gagawin?"))
+        assertNull(questionToAutoSend("   "))
+        assertNull(questionToAutoSend(null))
+    }
+
+    private fun foregroundStartNotAllowed(message: String): Exception {
+        val type = Class.forName("android.app.ForegroundServiceStartNotAllowedException")
+        val ctor = type.getConstructor(String::class.java)
+        return ctor.newInstance(message) as Exception
     }
 }

@@ -440,7 +440,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     override fun onCleared() {
         if (recorder.isRunning) recorder.stop()
         player?.release()
-        transcriber?.release()
+        transcriber?.release() // frees the native context on the whisper thread
         super.onCleared()
     }
 }

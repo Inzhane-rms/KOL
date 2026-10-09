@@ -101,4 +101,68 @@ class TriageEngineTest {
         val result = TriageEngine.triage("   ")
         assertFalse(result.actionable)
     }
+
+    @Test
+    fun naiipitIsCritical() {
+        val result = TriageEngine.triage("May naiipit sa loob")
+        assertEquals(Urgency.CRITICAL, result.urgency)
+        assertTrue(result.summary.contains("trapped"))
+    }
+
+    @Test
+    fun ipitIsCritical() {
+        val result = TriageEngine.triage("Ipit ang pinto")
+        assertEquals(Urgency.CRITICAL, result.urgency)
+        assertTrue(result.summary.contains("trapped"))
+    }
+
+    @Test
+    fun nagdudugoIsCritical() {
+        val result = TriageEngine.triage("Nagdudugo ang kamay")
+        assertEquals(Urgency.CRITICAL, result.urgency)
+        assertTrue(result.summary.contains("injured"))
+    }
+
+    @Test
+    fun dumugoIsCritical() {
+        val result = TriageEngine.triage("Dumugo ang ulo")
+        assertEquals(Urgency.CRITICAL, result.urgency)
+        assertTrue(result.summary.contains("injured"))
+    }
+
+    @Test
+    fun hindiWithOneWordBeforeHumihingaIsCritical() {
+        val na = TriageEngine.triage("Hindi na humihinga")
+        val siya = TriageEngine.triage("Hindi siya humihinga")
+        assertEquals(Urgency.CRITICAL, na.urgency)
+        assertEquals(Urgency.CRITICAL, siya.urgency)
+        assertTrue(na.summary.contains("medical"))
+        assertTrue(siya.summary.contains("medical"))
+    }
+
+    @Test
+    fun hindiWithTwoWordsBeforeHumihingaIsCritical() {
+        val result = TriageEngine.triage("Hindi po siya humihinga")
+        assertEquals(Urgency.CRITICAL, result.urgency)
+    }
+
+    @Test
+    fun diWithWordsBeforeHumihingaIsCritical() {
+        val one = TriageEngine.triage("Di na humihinga")
+        val two = TriageEngine.triage("Di na po humihinga")
+        assertEquals(Urgency.CRITICAL, one.urgency)
+        assertEquals(Urgency.CRITICAL, two.urgency)
+    }
+
+    @Test
+    fun exactHindiHumihingaStaysCritical() {
+        assertEquals(Urgency.CRITICAL, TriageEngine.triage("Hindi humihinga").urgency)
+        assertEquals(Urgency.CRITICAL, TriageEngine.triage("Di humihinga").urgency)
+    }
+
+    @Test
+    fun threeWordsBetweenHindiAndHumihingaIsNotCritical() {
+        val result = TriageEngine.triage("Hindi na talaga siya humihinga")
+        assertEquals(Urgency.NEEDS_HELP, result.urgency)
+    }
 }
