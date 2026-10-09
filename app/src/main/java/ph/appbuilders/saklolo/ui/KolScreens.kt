@@ -117,6 +117,7 @@ import ph.appbuilders.saklolo.ui.theme.PeachLight
 import ph.appbuilders.saklolo.ui.theme.PeachText
 import ph.appbuilders.saklolo.ui.theme.PillAmberText
 import ph.appbuilders.saklolo.ui.theme.Poppins
+import ph.appbuilders.saklolo.ui.theme.StatusGreen
 import ph.appbuilders.saklolo.contact.CallClock
 import ph.appbuilders.saklolo.ui.theme.Violet
 import ph.appbuilders.saklolo.ui.theme.VioletLight
@@ -451,6 +452,7 @@ fun KolChat(
     onChip: (ReplyChip) -> Unit,
 ) {
     val list = rememberKolListState()
+    val clock = remember { SimpleDateFormat("h:mm a", Locale.US) }
     Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding().padding(horizontal = 20.dp)) {
         Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             RoundButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", CardWhite, Ink, onBack)
@@ -499,10 +501,17 @@ fun KolChat(
                     if (own) {
                         Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                             if (row.inRange) {
-                                Text(KolNav.IN_RANGE, color = InkSoft, fontFamily = Poppins, fontSize = 11.sp)
+                                Icon(Icons.Filled.Check, contentDescription = KolNav.SENT, tint = StatusGreen, modifier = Modifier.size(12.dp))
+                                Text(
+                                    KolNav.bubbleStatus(true, clock.format(Date(message.createdAtMillis))),
+                                    color = InkSoft,
+                                    fontFamily = Poppins,
+                                    fontSize = 11.sp,
+                                    modifier = Modifier.padding(start = 4.dp),
+                                )
                             } else {
                                 Icon(Icons.Filled.Schedule, contentDescription = KolNav.WAITING, tint = Amber, modifier = Modifier.size(16.dp))
-                                Text(KolNav.WAITING, color = PillAmberText, fontFamily = Poppins, fontWeight = FontWeight.SemiBold, fontSize = 11.sp, modifier = Modifier.padding(start = 4.dp))
+                                Text(KolNav.bubbleStatus(false, ""), color = PillAmberText, fontFamily = Poppins, fontWeight = FontWeight.SemiBold, fontSize = 11.sp, modifier = Modifier.padding(start = 4.dp))
                             }
                         }
                     }

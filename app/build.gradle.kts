@@ -15,8 +15,8 @@ android {
         applicationId = "ph.appbuilders.saklolo"
         minSdk = 26
         targetSdk = 35
-        versionCode = 21
-        versionName = "0.12.3"
+        versionCode = 22
+        versionName = "0.12.4"
         ndk {
             // Phones at the demo are arm64. x86_64 covers an emulator.
             abiFilters += listOf("arm64-v8a", "x86_64")

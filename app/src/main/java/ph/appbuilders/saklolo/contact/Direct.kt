@@ -313,6 +313,13 @@ class DirectStore(private val persistence: DirectPersistence) {
         }
     }
 
+    fun wipe() = synchronized(lock) {
+        messages.clear()
+        contacts.clear()
+        nearby = emptySet()
+        persistLocked()
+    }
+
     fun snapshot(): DirectSnapshot = synchronized(lock) {
         DirectSnapshot(contacts.values.toList(), messages.values.toList())
     }

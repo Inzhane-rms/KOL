@@ -41,6 +41,7 @@ class WhisperReleaseTest {
                 threads: Int,
                 language: String,
                 prompt: String,
+                beam: Int,
             ): String {
                 order += "transcribe"
                 started.countDown()

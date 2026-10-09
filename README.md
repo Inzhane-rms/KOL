@@ -119,10 +119,17 @@ The rotating tips are short lines based on public guidance from the Philippine g
 
 The app does not declare the `INTERNET` permission. These are the only models that can run, and the same list is on the in-app **About** screen (Contacts → About):
 
-- **Whisper multilingual base**, file `ggml-base-q5_1.bin`. Speech to text on the phone. The language is Tagalog. Decoding uses temperature 0 (whisper.cpp keeps its default temperature fallback), no context, 4 threads, and greedy sampling with best_of 3. Beam search stays off until it is timed on a phone.
+- **Whisper multilingual base**, file `ggml-base-q5_1.bin`. Speech to text on the phone. The language is Tagalog. Decoding uses beam 5, temperature 0 stepping by 0.2, entropy 2.4, logprob -1.0, no context, and 4 threads. A clip that takes longer than its own length times 1.5 switches later clips to greedy best_of 3. Beam was not timed on a phone.
 - **Optional Tagalog small model.** If `ggml-small-tl-q5_1.bin` (about 50 MB or larger) is already in the app files directory, that file is loaded instead of base. It is [LWobole/whisper-small-tagalog](https://huggingface.co/LWobole/whisper-small-tagalog) (Apache-2.0, about 16.7% WER on FLEURS fil_ph). Convert with whisper.cpp `models/convert-h5-to-ggml.py`, then quantize to q5_1. It is not bundled and the app does not download it.
-- **Rules engine** in `TriageEngine`. Keyword and phrase matching for emergencies. Not a neural model. A lexicon may correct tokens of 5 or more characters before that check. The higher urgency of the raw Whisper line and the corrected line is kept. The screen shows the corrected line. The raw line stays on this phone.
+- **Rules engine** in `TriageEngine`. Keyword and phrase matching for emergencies. Not a neural model. After Whisper, a lexicon and phonetic match correct likely slips, spoken gate numbers become `Gate N`, and the line is sentence case. The higher urgency of the raw and corrected lines is kept. The screen shows the corrected line. The raw line stays on this phone. Gemma may clean non-emergency wording only, after the rules, and only when it is already loaded. A 4 second limit drops that cleanup.
 - **Gemma 3 1B** int4, only if `gemma3-1b-it-int4.task` was placed on the phone. If it is missing, the rules engine is used. Quick replies use the rules engine. Gemma may replace those chips only when it is already loaded, and only if it returns two or three short lines within 8 seconds. Otherwise the rules stay.
+
+The polish numbers below are from 15 simulated Whisper-like strings in `SpeechHearingTest`. They are not measured on real audio, and they were not run on a phone.
+
+| Pass | Exact match | Word hits |
+| --- | --- | --- |
+| Raw text, unchanged | 8/15 | 35/41 |
+| Lexicon, gate numbers, sentence case | 15/15 | 41/41 |
 
 ## DISCLOSURE
 

@@ -49,6 +49,15 @@ class GroupStore(private val persistence: GroupPersistence) {
         activeId = loaded.activeId?.takeIf { it in groups } ?: groups.values.maxByOrNull { it.joinedAtMillis }?.id
     }
 
+    fun wipe() = synchronized(this) {
+        groups.clear()
+        notes.clear()
+        localOriginIds.clear()
+        activeId = null
+        lastSeen.load(emptyList())
+        persist()
+    }
+
     fun groups(): List<ConcertGroup> = synchronized(this) { groups.values.toList() }
 
     fun memberIds(): Set<String> = synchronized(this) { groups.keys.toSet() }

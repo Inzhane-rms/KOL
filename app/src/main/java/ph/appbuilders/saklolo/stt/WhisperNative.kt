@@ -18,5 +18,6 @@ internal object WhisperNative {
         threads: Int,
         language: String,
         prompt: String,
+        beam: Int,
     ): String?
 }

@@ -58,4 +58,6 @@ class ReplyCache(private val max: Int = 32) {
     }
 
     fun size(): Int = synchronized(rows) { rows.size }
+
+    fun clear() = synchronized(rows) { rows.clear() }
 }

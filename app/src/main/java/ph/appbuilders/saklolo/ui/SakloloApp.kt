@@ -110,6 +110,8 @@ fun SakloloApp(viewModel: SakloloViewModel) {
     var quickCall by remember { mutableStateOf(false) }
     var nameDraft by remember { mutableStateOf(viewModel.displayName()) }
     var askName by remember { mutableStateOf(viewModel.needsNamePrompt()) }
+    var termsOk by remember { mutableStateOf(viewModel.termsAccepted()) }
+    var legalPage by remember { mutableStateOf<String?>(null) }
     var settingsOpen by remember { mutableStateOf(false) }
     var aboutOpen by remember { mutableStateOf(false) }
     var askedBattery by remember { mutableStateOf(false) }
@@ -200,8 +202,9 @@ fun SakloloApp(viewModel: SakloloViewModel) {
         other == peerId && message.kind in DirectGate.chatKinds
     }
     val modelReplies by viewModel.modelReplies.collectAsStateWithLifecycle()
-    val threadReplies = remember { ReplySession() }
-    val callReplies = remember { ReplySession() }
+    val wipeEpoch by viewModel.wipeEpoch.collectAsStateWithLifecycle()
+    val threadReplies = remember(wipeEpoch) { ReplySession() }
+    val callReplies = remember(wipeEpoch) { ReplySession() }
     val threadHeard = QuickReplies.latestHeard(threadMessages, viewModel.deviceId())
     val callHeard = call.captions.lastOrNull { !it.mine && !it.transcribing }?.text?.trim().orEmpty()
     LaunchedEffect(threadHeard) { viewModel.offerReplies(threadHeard) }
@@ -253,8 +256,10 @@ fun SakloloApp(viewModel: SakloloViewModel) {
         if (peer.isNotBlank()) peerId = peer
         route = KolNav.afterCall(peer)
     }
-    BackHandler(enabled = showSetup || askName || quickCall || route != HOME) {
+    BackHandler(enabled = legalPage != null || !termsOk || showSetup || askName || quickCall || route != HOME) {
         when {
+            legalPage != null -> legalPage = null
+            !termsOk -> Unit
             showSetup -> dismissSetup()
             askName -> Unit
             quickCall -> quickCall = false
@@ -523,7 +528,7 @@ fun SakloloApp(viewModel: SakloloViewModel) {
         }
     }
 
-    if (askName && !showSetup) {
+    if (askName && termsOk && !showSetup) {
         Dialog(
             onDismissRequest = {},
             properties = DialogProperties(
@@ -572,7 +577,19 @@ fun SakloloApp(viewModel: SakloloViewModel) {
     }
 
     if (aboutOpen) {
-        DisclosureDialog(onClose = { aboutOpen = false })
+        Dialog(
+            onDismissRequest = { aboutOpen = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            LegalHub(
+                onOpen = { legalPage = it },
+                onSettings = {
+                    aboutOpen = false
+                    settingsOpen = true
+                },
+                onClose = { aboutOpen = false },
+            )
+        }
     }
 
     if (settingsOpen) {
@@ -583,7 +600,51 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                 viewModel.applyDemo(name, restrict, allowlist, language)
                 settingsOpen = false
             },
+            onDeleteAll = {
+                viewModel.deleteAllData()
+                termsOk = false
+                askName = viewModel.needsNamePrompt()
+                nameDraft = viewModel.displayName()
+                settingsOpen = false
+                aboutOpen = false
+                legalPage = null
+                route = HOME
+                peerId = ""
+            },
         )
+    }
+
+    if (!termsOk) {
+        Dialog(
+            onDismissRequest = {},
+            properties = DialogProperties(
+                dismissOnBackPress = false,
+                dismissOnClickOutside = false,
+                usePlatformDefaultWidth = false,
+            ),
+        ) {
+            LegalGate(
+                onOpen = { legalPage = it },
+                onContinue = {
+                    viewModel.acceptTerms()
+                    termsOk = true
+                    startRelay(context)
+                },
+            )
+        }
+    }
+
+    legalPage?.let { page ->
+        Dialog(
+            onDismissRequest = { legalPage = null },
+            properties = DialogProperties(
+                dismissOnBackPress = true,
+                dismissOnClickOutside = false,
+                usePlatformDefaultWidth = false,
+            ),
+        ) {
+            LegalPage(name = page, onClose = { legalPage = null })
+        }
     }
 }
 

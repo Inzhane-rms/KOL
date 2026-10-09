@@ -10,6 +10,7 @@ object KolNav {
     const val HOLD_TO_TALK = "Hold to talk"
     const val IN_RANGE = "In range"
     const val WAITING = "Waiting"
+    const val SENT = "Sent"
     const val SEND_URGENT = "Send urgent message"
 
     /** The tab under a chat stays put. A chat itself is remembered for the call. */
@@ -61,6 +62,13 @@ object KolNav {
     fun friendsLine(inRange: Int): String =
         if (inRange == 1) "Offline · 1 friend in range" else "Offline · $inRange friends in range"
 
+    /** In-range means this phone handed the message to that phone. There is no receipt. */
+    fun bubbleStatus(inRange: Boolean, time: String): String =
+        if (inRange) "$SENT · $time" else WAITING
+
+    fun homeStatus(inRange: Boolean, name: String): String =
+        if (inRange) "$SENT · $name" else "$WAITING · $name"
+
     fun homeBackLabel(setupMissing: Int, waitingPeers: Int, lastHeardMillis: Long, now: Long): String = when {
         setupMissing > 0 -> "Setup needed"
         waitingPeers == 1 -> "1 queued"
@@ -101,11 +109,11 @@ object KolNav {
             .maxByOrNull { it.createdAtMillis }
             ?.let { message ->
                 val name = peerName(message.toDeviceId, contacts, "")
-                val delivered = contacts.firstOrNull { it.deviceId == message.toDeviceId }?.inRange == true
+                val handedOff = contacts.firstOrNull { it.deviceId == message.toDeviceId }?.inRange == true
                 rows += KolActivity(
-                    title = if (delivered) "$IN_RANGE · $name" else "$WAITING · $name",
+                    title = homeStatus(handedOff, name),
                     detail = CaptionDisplay.text(message.body),
-                    tone = if (delivered) "sent" else "waiting",
+                    tone = if (handedOff) "sent" else "waiting",
                     at = message.createdAtMillis,
                     peerId = message.toDeviceId,
                 )
@@ -150,6 +158,7 @@ object KolCopy {
         KolNav.HOLD_TO_TALK,
         KolNav.IN_RANGE,
         KolNav.WAITING,
+        KolNav.SENT,
         KolNav.SEND_URGENT,
         "View all",
         "Scan QR",

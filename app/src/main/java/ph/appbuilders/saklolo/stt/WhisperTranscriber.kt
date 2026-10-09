@@ -12,7 +12,7 @@ import kotlinx.coroutines.withContext
 internal interface WhisperEngine {
     fun initContext(modelPath: String): Long
     fun freeContext(contextPtr: Long)
-    fun transcribe(contextPtr: Long, audio: FloatArray, threads: Int, language: String, prompt: String): String?
+    fun transcribe(contextPtr: Long, audio: FloatArray, threads: Int, language: String, prompt: String, beam: Int): String?
 }
 
 private object JniWhisperEngine : WhisperEngine {
@@ -28,7 +28,8 @@ private object JniWhisperEngine : WhisperEngine {
         threads: Int,
         language: String,
         prompt: String,
-    ): String? = WhisperNative.transcribe(contextPtr, audio, threads, language, prompt)
+        beam: Int,
+    ): String? = WhisperNative.transcribe(contextPtr, audio, threads, language, prompt, beam)
 }
 
 /**
@@ -45,6 +46,7 @@ class WhisperTranscriber internal constructor(
     private val dispatcher = executor.asCoroutineDispatcher()
     private val released = AtomicBoolean(false)
     private var contextPtr: Long = 0
+    private var beamSlow = false
 
     @Suppress("UNUSED_PARAMETER")
     suspend fun transcribe(pcm16k: FloatArray, languageCode: String, names: List<String> = emptyList()): String = withContext(dispatcher) {
@@ -57,15 +59,20 @@ class WhisperTranscriber internal constructor(
                 error("Could not load the on-device speech model")
             }
         }
-        engine.transcribe(
+        val clipSeconds = audio.size / SpeechPrep.SAMPLE_RATE.toDouble()
+        val beam = if (DecodeBudget.allowBeam(WhisperPrompt.BEAM, beamSlow)) WhisperPrompt.BEAM else 1
+        val started = System.nanoTime()
+        val text = engine.transcribe(
             contextPtr,
             audio,
             WhisperPrompt.THREADS,
             WhisperPrompt.LANGUAGE,
             WhisperPrompt.text(names),
+            beam,
         )
-            ?.trim()
-            .orEmpty()
+        val elapsed = (System.nanoTime() - started) / 1_000_000_000.0
+        if (beam > 1 && DecodeBudget.markSlow(elapsed, clipSeconds)) beamSlow = true
+        text?.trim().orEmpty()
     }
 
     fun release() {

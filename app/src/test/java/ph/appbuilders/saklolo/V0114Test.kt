@@ -110,8 +110,10 @@ class V0114Test {
     fun whisperStaysOnTagalogWithConcertWords() {
         assertEquals("tl", WhisperPrompt.LANGUAGE)
         assertEquals(4, WhisperPrompt.THREADS)
+        assertEquals(5, WhisperPrompt.BEAM)
         assertEquals(3, WhisperPrompt.BEST_OF)
-        assertFalse(WhisperPrompt.USE_BEAM)
+        assertTrue(WhisperPrompt.USE_BEAM)
+        assertTrue(WhisperPrompt.text(emptyList()).contains(WhisperPrompt.LEXICON))
         assertTrue(WhisperPrompt.TEXT.contains("Nasaan ka?"))
         assertTrue(WhisperPrompt.TEXT.contains("Nahimatay si Ana"))
         assertTrue(WhisperPrompt.text(listOf("Ana", "Ben")).endsWith("Ana, Ben."))

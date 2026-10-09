@@ -43,7 +43,8 @@ Java_ph_appbuilders_saklolo_stt_WhisperNative_transcribe(
         jfloatArray audio,
         jint threads,
         jstring language,
-        jstring prompt) {
+        jstring prompt,
+        jint beam) {
     (void) clazz;
     (void) language;
     if (ptr == 0 || audio == NULL) {
@@ -55,10 +56,11 @@ Java_ph_appbuilders_saklolo_stt_WhisperNative_transcribe(
     const jsize n_samples = (*env)->GetArrayLength(env, audio);
     const char *hint = prompt != NULL ? (*env)->GetStringUTFChars(env, prompt, NULL) : NULL;
 
-    /* Greedy best_of 3. Beam 5 stays off until it is timed on a phone.
-       temperature 0 keeps whisper.cpp's default temperature_inc fallback.
-       no_context is on. Language is Tagalog. */
-    struct whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+    /* Beam size comes from Kotlin. 1 means greedy best_of 3.
+       Temperature starts at 0 and steps by 0.2. Entropy 2.4 and logprob -1.0
+       are the fallback thresholds. Language is Tagalog. no_context is on. */
+    struct whisper_full_params params = whisper_full_default_params(
+            beam > 1 ? WHISPER_SAMPLING_BEAM_SEARCH : WHISPER_SAMPLING_GREEDY);
     params.print_realtime = false;
     params.print_progress = false;
     params.print_timestamps = false;
@@ -72,13 +74,20 @@ Java_ph_appbuilders_saklolo_stt_WhisperNative_transcribe(
     params.suppress_blank = true;
     params.suppress_nst = true;
     params.temperature = 0.0f;
+    params.temperature_inc = 0.2f;
+    params.entropy_thold = 2.4f;
+    params.logprob_thold = -1.0f;
     params.language = "tl";
     params.detect_language = false;
-    params.greedy.best_of = 3;
+    if (beam > 1) {
+        params.beam_search.beam_size = beam;
+    } else {
+        params.greedy.best_of = 3;
+    }
     params.initial_prompt = (hint != NULL && hint[0] != '\0') ? hint : NULL;
     params.carry_initial_prompt = params.initial_prompt != NULL;
 
-    LOGI("transcribe samples=%d threads=%d lang=%s best_of=%d", (int) n_samples, params.n_threads, params.language, params.greedy.best_of);
+    LOGI("transcribe samples=%d threads=%d lang=%s beam=%d", (int) n_samples, params.n_threads, params.language, (int) beam);
     const int rc = whisper_full(ctx, params, samples, n_samples);
     (*env)->ReleaseFloatArrayElements(env, audio, samples, JNI_ABORT);
     if (hint != NULL) {

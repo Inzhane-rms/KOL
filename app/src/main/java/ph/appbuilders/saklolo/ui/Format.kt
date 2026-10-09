@@ -6,6 +6,10 @@ import java.util.Locale
 import ph.appbuilders.saklolo.model.Alert
 import ph.appbuilders.saklolo.triage.Urgency
 
+/** Clock time on a sent bubble, such as 9:13 AM. */
+fun messageClock(millis: Long): String =
+    SimpleDateFormat("h:mm a", Locale.US).format(Date(millis))
+
 fun formatWhen(millis: Long, now: Long = System.currentTimeMillis()): String {
     val delta = (now - millis).coerceAtLeast(0)
     val minutes = delta / 60_000

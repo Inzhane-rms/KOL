@@ -1,6 +1,7 @@
 package ph.appbuilders.saklolo
 
 import android.app.Application
+import android.content.Intent
 import androidx.room.Room
 import java.io.File
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,6 +28,7 @@ import ph.appbuilders.saklolo.model.AlertJson
 import ph.appbuilders.saklolo.model.AlertStore
 import ph.appbuilders.saklolo.relay.NearbyPeer
 import ph.appbuilders.saklolo.relay.NearbyRelay
+import ph.appbuilders.saklolo.relay.RelayService
 import ph.appbuilders.saklolo.relay.PeerFilter
 import ph.appbuilders.saklolo.relay.ReadyToConnect
 import ph.appbuilders.saklolo.relay.SetupProbe
@@ -108,6 +110,11 @@ class SakloloRuntime private constructor(val app: Application) {
         val facts = SetupProbe.read(app)
         val line = ReadyToConnect.permissionLine(facts)
         relay.setFilter(settings.peerFilter())
+        if (!settings.termsAccepted) {
+            android.util.Log.i("BLINK", "relay service start skipped until terms")
+            relay.stopScanning("Setup needed")
+            return
+        }
         if (!ReadyToConnect.shouldStart(facts)) {
             android.util.Log.i("BLINK", "relay service start skipped permissions=$line")
             relay.stopScanning("Setup needed (${ReadyToConnect.requiredMissing(facts)})")
@@ -119,6 +126,33 @@ class SakloloRuntime private constructor(val app: Application) {
 
     fun noteRelayStartFailed(message: String) {
         relay.noteServiceStartFailed(message)
+    }
+
+    fun wipeUserData(clearReplies: () -> Unit = {}) {
+        UserDataErase.run(
+            stopRelay = {
+                relay.stopScanning("Deleted")
+                app.stopService(Intent(app, RelayService::class.java))
+            },
+            clearRoom = {
+                directStore.wipe()
+                store.wipe()
+                groupStore.wipe()
+            },
+            clearClips = {
+                clipsDir.listFiles()?.forEach { file -> file.delete() }
+                File(app.filesDir, "alerts.json").delete()
+            },
+            clearPrefs = { settings.clear() },
+            clearReplies = clearReplies,
+            newDeviceId = {
+                directStore.myId = settings.deviceId
+                directStore.myId
+            },
+        )
+        refreshAlerts()
+        refreshGroups()
+        refreshDirect()
     }
 
     fun applyDemo(name: String, restrict: Boolean, allowlist: String) {

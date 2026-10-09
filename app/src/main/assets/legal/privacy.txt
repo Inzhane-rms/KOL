@@ -1,0 +1,15 @@
+We designed KOL with the Philippine Data Privacy Act of 2012 (RA 10173) in mind.
+
+No account and no internet. KOL has no sign-up and doesn't use the internet. It talks only to nearby phones over Bluetooth and Wi-Fi, through Google Nearby Connections (part of Google Play services).
+
+What stays on your phone. Your display name, your contacts, your messages, voice clips, and transcripts are stored only on your phone. We have no server, so we can't see or collect them.
+
+What nearby phones see. Phones near you can see your display name and device ID. Messages go to the person you send them to, and they may pass through other KOL phones on the way, over Bluetooth or Wi-Fi. Nothing is sent to the internet. Messages are not end-to-end encrypted, so don't send anything sensitive.
+
+Microphone. KOL uses the mic only while you're recording a voice note or holding "Hold to talk".
+
+Location. Android needs the Location permission to find nearby devices. One-to-one messages do not include your coordinates. An SOS alert or a group note can include the phone's last known location when one is available.
+
+AI. Speech-to-text (Whisper) and emergency detection run entirely on your phone. Nothing is sent to the cloud. A lexicon and fuzzy match run on the phone after Whisper. If Gemma is already loaded, it may clean non-emergency wording only. Emergency text is not sent to Gemma.
+
+Deleting your data. Uninstall KOL, clear its storage, or use Settings > Delete all data.

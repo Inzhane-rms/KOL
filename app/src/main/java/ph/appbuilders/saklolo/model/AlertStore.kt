@@ -92,6 +92,12 @@ class AlertStore(private val persistence: AlertPersistence) {
         if (alerts.isNotEmpty()) persist()
     }
 
+    fun wipe() = synchronized(this) {
+        alerts.clear()
+        localOriginIds.clear()
+        persist()
+    }
+
     fun remove(id: String) = synchronized(this) {
         if (alerts.remove(id) != null) {
             localOriginIds.remove(id)

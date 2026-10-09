@@ -146,6 +146,46 @@ object GemmaSummarizer {
         }
     }
 
+    /**
+     * Light wording cleanup. Call only after the rules, and only for text that
+     * is not an emergency. Returns null when Gemma is not already loaded, is busy,
+     * or does not answer within 4 seconds.
+     */
+    fun cleanupCaption(text: String): String? {
+        if (text.isBlank() || engine == null || policy.gaveUp) return null
+        if (!policy.tryBeginInference()) return null
+        val llm = engine ?: run {
+            policy.finishInference()
+            return null
+        }
+        val future = try {
+            executor.submit<String?> {
+                try {
+                    askCleanup(llm, text).trim().lineSequence().firstOrNull()?.trim()
+                } catch (error: Exception) {
+                    Log.w(TAG, "caption cleanup failed", error)
+                    null
+                } finally {
+                    policy.finishInference()
+                }
+            }
+        } catch (error: Throwable) {
+            policy.finishInference()
+            Log.w(TAG, "caption cleanup submit failed", error)
+            return null
+        }
+        return try {
+            future.get(4, TimeUnit.SECONDS)?.takeIf { it.isNotEmpty() }
+        } catch (_: TimeoutException) {
+            policy.noteInferenceTimeout()
+            future.cancel(true)
+            null
+        } catch (error: Exception) {
+            Log.w(TAG, "caption cleanup wait failed", error)
+            null
+        }
+    }
+
     fun refine(context: Context, transcript: String, rulesSummary: String): SummaryChoice {
         val rules = SummaryChoice(rulesSummary, SummaryRefine.RULES)
         val llm = engine
@@ -260,6 +300,27 @@ object GemmaSummarizer {
                 One reply per line. No numbers. No explanation.
                 Each line under 40 characters.
                 Message: ${heard.take(240)}
+                """.trimIndent(),
+            )
+            session.generateResponse()
+        } finally {
+            session.close()
+        }
+    }
+
+    private fun askCleanup(llm: LlmInference, text: String): String {
+        val sessionOptions = LlmInferenceSession.LlmInferenceSessionOptions.builder()
+            .setTopK(1)
+            .setTemperature(0f)
+            .build()
+        val session = LlmInferenceSession.createFromOptions(llm, sessionOptions)
+        return try {
+            session.addQueryChunk(
+                """
+                Fix spelling, casing, and punctuation in this caption.
+                Keep the same meaning. Do not add facts. Do not translate.
+                One line only.
+                Caption: ${text.take(400)}
                 """.trimIndent(),
             )
             session.generateResponse()

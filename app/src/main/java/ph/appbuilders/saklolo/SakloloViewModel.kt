@@ -57,8 +57,10 @@ import ph.appbuilders.saklolo.location.DeviceLocation
 import ph.appbuilders.saklolo.model.Alert
 import ph.appbuilders.saklolo.relay.NearbyPeer
 import ph.appbuilders.saklolo.relay.QrCodec
+import ph.appbuilders.saklolo.stt.CaptionCleanup
 import ph.appbuilders.saklolo.stt.ModelInstaller
 import ph.appbuilders.saklolo.stt.PcmRecorder
+import ph.appbuilders.saklolo.stt.SentenceCase
 import ph.appbuilders.saklolo.stt.SpeechHearing
 import ph.appbuilders.saklolo.stt.SpeechLanguage
 import ph.appbuilders.saklolo.stt.WhisperTranscriber
@@ -184,6 +186,8 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _notice = MutableStateFlow<String?>(null)
     val notice: StateFlow<String?> = _notice.asStateFlow()
+    private val _wipeEpoch = MutableStateFlow(0)
+    val wipeEpoch: StateFlow<Int> = _wipeEpoch.asStateFlow()
 
     init {
         viewModelScope.launch {
@@ -570,6 +574,45 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     fun displayName(): String = runtime.settings.displayName
 
     fun needsNamePrompt(): Boolean = NameChoice.show(runtime.settings.nameChosen)
+
+    fun termsAccepted(): Boolean = runtime.settings.termsAccepted
+
+    fun acceptTerms() {
+        runtime.settings.termsAccepted = true
+    }
+
+    /** Clears local messages, contacts, clips, and preferences. The speech model file stays. */
+    fun deleteAllData() {
+        viewModelScope.launch {
+            recordGate.withLock {
+                if (recorder.isRunning) {
+                    runtime.relay.onLocalRecordingFinished()
+                    recorder.stop()
+                }
+            }
+        }
+        player?.release()
+        player = null
+        holding = false
+        holdElapsed = 0
+        transcribingHold = false
+        holdMuted = HoldMute.afterEnd()
+        if (call.phase != CallPhase.IDLE) {
+            releaseCallAudio()
+        }
+        noteCall(CallState())
+        threadRead.clear()
+        runtime.wipeUserData {
+            replyCache.clear()
+            _modelReplies.value = emptyMap()
+        }
+        _call.value = CallUi()
+        _voice.value = VoiceUiState()
+        _sos.update { it.copy(recording = false, elapsedSec = 0, transcript = "", summary = "", urgency = null) }
+        _threads.value = emptyList()
+        _wipeEpoch.value += 1
+        _notice.value = null
+    }
 
     fun setupSeen(): Boolean = runtime.settings.setupSeen
 
@@ -1285,7 +1328,13 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun hear(engine: WhisperTranscriber, pcm: FloatArray): SpeechHearing {
         val names = contactNames()
         val raw = withContext(Dispatchers.Default) { engine.transcribe(pcm, _sos.value.language.whisperCode, names) }
-        return SpeechHearing.interpret(raw, names)
+        val heard = SpeechHearing.interpret(raw, names)
+        if (!CaptionCleanup.allowModel(heard.urgency, heard.raw, heard.shown)) return heard
+        val cleaned = withContext(Dispatchers.IO) { GemmaSummarizer.cleanupCaption(heard.shown) } ?: return heard
+        if (!CaptionCleanup.acceptModel(heard.shown, cleaned)) return heard
+        val shown = SentenceCase.apply(cleaned)
+        val urgency = SpeechHearing.higher(TriageEngine.triage(heard.raw), TriageEngine.triage(shown)).urgency
+        return heard.copy(shown = shown, urgency = urgency)
     }
 
     private fun contactNames(): List<String> =
