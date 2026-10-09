@@ -7,6 +7,28 @@ import ph.appbuilders.saklolo.contact.DirectMessage
 /** Tab order, motion, and the real rows the Home screen can show. */
 object KolNav {
     const val MOTION_MS = 220
+    const val HOLD_TO_TALK = "Hold to talk"
+    const val IN_RANGE = "In range"
+    const val WAITING = "Waiting"
+    const val SEND_URGENT = "Send urgent message"
+
+    /** The tab under a chat stays put. A chat itself is remembered for the call. */
+    fun backTarget(route: String, current: String): String = when {
+        route == MainNav.THREAD -> MainNav.THREAD
+        showsBar(route) -> route
+        else -> current
+    }
+
+    fun afterCall(peer: String): String = if (peer.isNotBlank()) MainNav.THREAD else MainNav.HOME
+
+    /**
+     * Bar is 304dp, padding 8+8, three 8dp gaps, three 48dp idle slots.
+     * Room for the pill is 120, so 124 does not fit.
+     */
+    fun navPillWidth(): Int {
+        val room = 304 - (8 * 2) - (8 * 3) - (48 * 3)
+        return if (room >= 124) 124 else 120
+    }
 
     fun showsBar(route: String): Boolean = route != MainNav.CALL && route != MainNav.THREAD
 
@@ -81,7 +103,7 @@ object KolNav {
                 val name = peerName(message.toDeviceId, contacts, "")
                 val delivered = contacts.firstOrNull { it.deviceId == message.toDeviceId }?.inRange == true
                 rows += KolActivity(
-                    title = if (delivered) "Message delivered · $name" else "Waiting · $name",
+                    title = if (delivered) "$IN_RANGE · $name" else "$WAITING · $name",
                     detail = CaptionDisplay.text(message.body),
                     tone = if (delivered) "sent" else "waiting",
                     at = message.createdAtMillis,
@@ -120,3 +142,25 @@ data class KolActivity(
     val at: Long,
     val peerId: String,
 )
+
+/** Live labels. The copy test reads these and strings.xml. */
+object KolCopy {
+    val LABELS = listOf(
+        "KOL",
+        KolNav.HOLD_TO_TALK,
+        KolNav.IN_RANGE,
+        KolNav.WAITING,
+        KolNav.SEND_URGENT,
+        "View all",
+        "Scan QR",
+        "Share my code",
+        "Possible emergency",
+        "Add a friend",
+        "In range now",
+        "Live captions · on-device",
+        "AI transcript",
+        "Scan their contact QR",
+        "That QR is not a KOL contact code",
+        "Ready to connect",
+    )
+}

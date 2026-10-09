@@ -1,18 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-    <!-- 60dp squircle, inset 24dp, corner radius 24 (40% of the tile). -->
-    <path android:pathData="M48,24 L60,24 A24,24 0 0 1 84,48 L84,60 A24,24 0 0 1 60,84 L48,84 A24,24 0 0 1 24,60 L24,48 A24,24 0 0 1 48,24 Z">
+    android:width="60dp"
+    android:height="60dp"
+    android:viewportWidth="60"
+    android:viewportHeight="60">
+    <!-- Same squircle as the launcher foreground, without the 108dp padding. -->
+    <path android:pathData="M24,0 L36,0 A24,24 0 0 1 60,24 L60,36 A24,24 0 0 1 36,60 L24,60 A24,24 0 0 1 0,36 L0,24 A24,24 0 0 1 24,0 Z">
         <aapt:attr name="android:fillColor">
             <gradient
-                android:endX="84"
-                android:endY="84"
-                android:startX="24"
-                android:startY="24"
+                android:endX="60"
+                android:endY="60"
+                android:startX="0"
+                android:startY="0"
                 android:type="linear">
                 <item
                     android:color="#FF7C5CFA"
@@ -26,8 +26,8 @@
     <group
         android:scaleX="0.44"
         android:scaleY="0.44"
-        android:translateX="54"
-        android:translateY="54">
+        android:translateX="30"
+        android:translateY="30">
         <path
             android:fillColor="#FFFFFF"
             android:pathData="M-8,-42 A8,8 0 0 1 8,-42 L8,0 A8,8 0 0 1 -8,0 Z" />

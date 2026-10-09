@@ -119,8 +119,9 @@ The rotating tips are short lines based on public guidance from the Philippine g
 
 The app does not declare the `INTERNET` permission. These are the only models that can run, and the same list is on the in-app **About** screen (Contacts → About):
 
-- **Whisper multilingual base**, file `ggml-base-q5_1.bin`. Speech to text on the phone. The language is forced to Tagalog.
-- **Rules engine** in `TriageEngine`. Keyword and phrase matching for emergencies. Not a neural model.
+- **Whisper multilingual base**, file `ggml-base-q5_1.bin`. Speech to text on the phone. The language is Tagalog. Decoding uses temperature 0 (whisper.cpp keeps its default temperature fallback), no context, 4 threads, and greedy sampling with best_of 3. Beam search stays off until it is timed on a phone.
+- **Optional Tagalog small model.** If `ggml-small-tl-q5_1.bin` (about 50 MB or larger) is already in the app files directory, that file is loaded instead of base. It is [LWobole/whisper-small-tagalog](https://huggingface.co/LWobole/whisper-small-tagalog) (Apache-2.0, about 16.7% WER on FLEURS fil_ph). Convert with whisper.cpp `models/convert-h5-to-ggml.py`, then quantize to q5_1. It is not bundled and the app does not download it.
+- **Rules engine** in `TriageEngine`. Keyword and phrase matching for emergencies. Not a neural model. A lexicon may correct tokens of 5 or more characters before that check. The higher urgency of the raw Whisper line and the corrected line is kept. The screen shows the corrected line. The raw line stays on this phone.
 - **Gemma 3 1B** int4, only if `gemma3-1b-it-int4.task` was placed on the phone. If it is missing, the rules engine is used. Quick replies use the rules engine. Gemma may replace those chips only when it is already loaded, and only if it returns two or three short lines within 8 seconds. Otherwise the rules stay.
 
 ## DISCLOSURE
@@ -130,6 +131,7 @@ Everything below is part of how B-LINK was built or how it runs. The on-device p
 **Models**
 
 - OpenAI Whisper multilingual **base**, file `ggml-base-q5_1.bin` (SHA-256 `422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898`), converted to ggml by the whisper.cpp project and published at `ggerganov/whisper.cpp` on Hugging Face. Whisper weights are MIT.
+- Optional **LWobole/whisper-small-tagalog** (Apache-2.0). Not in the APK. Used only when `ggml-small-tl-q5_1.bin` was placed in the app files directory after conversion with whisper.cpp and q5_1 quantization.
 - Google **Gemma 3 1B** int4 (`.task`), sideloaded by the person installing the demo, not bundled. Used only through MediaPipe LLM Inference. It loads in the background at app start when the file exists and the phone reports at least 3.4 GiB of RAM. The 15 second limit wraps inference only. On the recorder it may refine the one-line summary. On Ask B-LINK, if the keyword match misses and the model is already loaded, it may return a stored pair id or `NONE`. That id is accepted only when it is one of the bundled pairs. Gemma's own words are never shown. One failure is retried on the next alert. Gemma is used under Google's Gemma Terms of Use. If the file is absent, this model does not run.
 - Keyword and phrase classifier in `TriageEngine.kt` for urgency and for the fallback summary.
 - Ask B-LINK bank, `app/src/main/assets/ask/ask_blink_qa.json`, bundled in the APK. Eighteen Tagalog and English answers drawn from the Philippine government Disaster Preparedness & First Aid Handbook (climate.gov.ph) and UNICEF Philippines emergency preparedness tips. Thirty-two medical phrases skip the tip and open the SOS recorder. The no-match line is the stored fallback, not a generated sentence.
@@ -158,6 +160,8 @@ Everything below is part of how B-LINK was built or how it runs. The on-device p
 **Evaluated and not shipped**
 
 - Vosk Android and `vosk-model-tl-ph-generic-0.6` (size and CC-BY-NC-SA).
+- RNNoise. A native denoise pass was not added. The phone still uses Android NoiseSuppressor, automatic gain control, and acoustic echo cancellation, plus the existing high-pass filter and voice-activity trim.
+- sapinsapin (license not verified).
 - LiteRT-LM (`litertlm-android`). Current releases want a newer Kotlin toolchain than this project, and they load `.litertlm` bundles rather than the MediaPipe `.task` file named for this demo.
 
 ## License of this app code

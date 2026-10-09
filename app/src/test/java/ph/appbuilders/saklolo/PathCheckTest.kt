@@ -123,6 +123,8 @@ class PathCheckTest {
         assertTrue(ModelDisclosure.mentions("Gemma 3 1B"))
         assertTrue(ModelDisclosure.mentions("rules engine"))
         assertTrue(ModelDisclosure.mentions("no internet"))
+        assertTrue(ModelDisclosure.mentions("whisper-small-tagalog"))
+        assertFalse(ModelDisclosure.LINES.any { it.contains("RNNoise") })
         val manifest = File("src/main/AndroidManifest.xml")
         if (manifest.exists()) {
             val text = manifest.readText()

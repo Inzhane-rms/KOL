@@ -55,8 +55,9 @@ Java_ph_appbuilders_saklolo_stt_WhisperNative_transcribe(
     const jsize n_samples = (*env)->GetArrayLength(env, audio);
     const char *hint = prompt != NULL ? (*env)->GetStringUTFChars(env, prompt, NULL) : NULL;
 
-    /* Greedy best_of 5. Beam 5 on multilingual base was left off: it multiplies
-       decoder work and was not timed on a Camon 40. Language is always Tagalog. */
+    /* Greedy best_of 3. Beam 5 stays off until it is timed on a phone.
+       temperature 0 keeps whisper.cpp's default temperature_inc fallback.
+       no_context is on. Language is Tagalog. */
     struct whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
     params.print_realtime = false;
     params.print_progress = false;
@@ -66,14 +67,14 @@ Java_ph_appbuilders_saklolo_stt_WhisperNative_transcribe(
     params.no_context = true;
     params.single_segment = false;
     params.no_timestamps = true;
-    params.n_threads = threads > 0 ? threads : 2;
+    params.n_threads = threads > 0 ? threads : 4;
     params.offset_ms = 0;
     params.suppress_blank = true;
     params.suppress_nst = true;
     params.temperature = 0.0f;
     params.language = "tl";
     params.detect_language = false;
-    params.greedy.best_of = 5;
+    params.greedy.best_of = 3;
     params.initial_prompt = (hint != NULL && hint[0] != '\0') ? hint : NULL;
     params.carry_initial_prompt = params.initial_prompt != NULL;
 

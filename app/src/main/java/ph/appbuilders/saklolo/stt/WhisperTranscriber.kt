@@ -47,7 +47,7 @@ class WhisperTranscriber internal constructor(
     private var contextPtr: Long = 0
 
     @Suppress("UNUSED_PARAMETER")
-    suspend fun transcribe(pcm16k: FloatArray, languageCode: String): String = withContext(dispatcher) {
+    suspend fun transcribe(pcm16k: FloatArray, languageCode: String, names: List<String> = emptyList()): String = withContext(dispatcher) {
         if (released.get()) error("Speech model was released")
         val audio = SpeechPrep.prepare(pcm16k)
         if (audio.isEmpty()) return@withContext ""
@@ -57,8 +57,13 @@ class WhisperTranscriber internal constructor(
                 error("Could not load the on-device speech model")
             }
         }
-        val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
-        engine.transcribe(contextPtr, audio, threads, WhisperPrompt.LANGUAGE, WhisperPrompt.TEXT)
+        engine.transcribe(
+            contextPtr,
+            audio,
+            WhisperPrompt.THREADS,
+            WhisperPrompt.LANGUAGE,
+            WhisperPrompt.text(names),
+        )
             ?.trim()
             .orEmpty()
     }

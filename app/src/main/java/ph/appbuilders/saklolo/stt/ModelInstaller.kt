@@ -15,12 +15,24 @@ import kotlinx.coroutines.withContext
  */
 object ModelInstaller {
     const val FILE_NAME = "ggml-base-q5_1.bin"
+    const val SMALL_TL_FILE = "ggml-small-tl-q5_1.bin"
+    const val SMALL_TL_MIN_BYTES = 50L * 1024 * 1024
     const val ASSET_PATH = "models/$FILE_NAME"
     const val EXPECTED_BYTES = 59_707_625L
     const val EXPECTED_SHA256 = "422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898"
     const val MODEL_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q5_1.bin"
 
     fun installedFile(context: Context): File = File(context.filesDir, FILE_NAME)
+
+    /**
+     * Optional Tagalog small model. Place `ggml-small-tl-q5_1.bin` in the app files
+     * directory (LWobole/whisper-small-tagalog, Apache-2.0, converted with
+     * whisper.cpp convert-h5-to-ggml.py and quantized q5_1). It is not bundled.
+     */
+    fun resolve(context: Context): File {
+        val small = File(context.filesDir, SMALL_TL_FILE)
+        return if (small.exists() && small.length() >= SMALL_TL_MIN_BYTES) small else installedFile(context)
+    }
 
     fun isReady(context: Context): Boolean = installedFile(context).let { it.exists() && it.length() == EXPECTED_BYTES }
 

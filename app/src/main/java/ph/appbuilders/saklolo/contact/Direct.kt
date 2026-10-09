@@ -36,6 +36,8 @@ data class DirectMessage(
     val kind: String = "text",
     val audioPath: String? = null,
     val localOrigin: Boolean = false,
+    /** Whisper text before lexicon correction. Stays on this phone. */
+    val rawBody: String? = null,
 )
 
 data class DirectSnapshot(
@@ -200,6 +202,10 @@ object Ptt {
     fun triageCaption(text: String) = TriageEngine.triage(text)
 
     fun emergency(text: String): Boolean = triageCaption(text).urgency == Urgency.CRITICAL
+
+    /** Higher of the shown line and the stored Whisper line. */
+    fun either(body: String, raw: String?): Boolean =
+        emergency(body) || (!raw.isNullOrBlank() && emergency(raw))
 }
 
 enum class CallPhase { IDLE, OUTGOING, INCOMING, ACTIVE }
@@ -413,7 +419,7 @@ class DirectStore(private val persistence: DirectPersistence) {
             val critical = msgs.lastOrNull { message ->
                 message.fromDeviceId == peerId &&
                     message.kind != "ping" &&
-                    Ptt.emergency(message.body)
+                    Ptt.either(message.body, message.rawBody)
             }
             Conversation(
                 peerId = peerId,

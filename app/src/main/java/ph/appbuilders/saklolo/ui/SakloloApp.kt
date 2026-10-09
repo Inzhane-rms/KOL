@@ -101,6 +101,8 @@ fun SakloloApp(viewModel: SakloloViewModel) {
     var route by rememberSaveable { mutableStateOf(HOME) }
     var peerId by rememberSaveable { mutableStateOf("") }
     var backTab by rememberSaveable { mutableStateOf(HOME) }
+    var callFrom by rememberSaveable { mutableStateOf(HOME) }
+    var callPeer by rememberSaveable { mutableStateOf("") }
     var filter by rememberSaveable { mutableStateOf("all") }
     var draft by rememberSaveable { mutableStateOf("") }
     var search by rememberSaveable { mutableStateOf("") }
@@ -224,9 +226,18 @@ fun SakloloApp(viewModel: SakloloViewModel) {
         if (route == THREAD && peerId.isNotEmpty()) viewModel.markThreadRead(peerId)
         if (route == THREAD && openRow == null) route = if (backTab == THREAD) MESSAGES else backTab
     }
-    LaunchedEffect(call.phase) {
+    LaunchedEffect(call.phase, call.peerId) {
         if (call.phase == CallPhase.INCOMING || call.phase == CallPhase.OUTGOING || call.phase == CallPhase.ACTIVE) {
-            if (route != CALL) route = CALL
+            if (call.peerId.isNotBlank()) callPeer = call.peerId
+            if (route != CALL) {
+                if (KolNav.showsBar(route)) backTab = route
+                callFrom = KolNav.backTarget(route, callFrom)
+                route = CALL
+            }
+        } else if (route == CALL) {
+            val peer = call.peerId.ifBlank { callPeer }
+            if (peer.isNotBlank()) peerId = peer
+            route = KolNav.afterCall(peer)
         }
     }
     val setupMissing = ReadyToConnect.requiredMissing(facts)
@@ -236,15 +247,18 @@ fun SakloloApp(viewModel: SakloloViewModel) {
         setupSeen = true
         pillTapped = false
     }
+    fun leaveCall(end: Boolean) {
+        val peer = call.peerId.ifBlank { callPeer }
+        if (end) viewModel.endCall() else viewModel.declineCall()
+        if (peer.isNotBlank()) peerId = peer
+        route = KolNav.afterCall(peer)
+    }
     BackHandler(enabled = showSetup || askName || quickCall || route != HOME) {
         when {
             showSetup -> dismissSetup()
             askName -> Unit
             quickCall -> quickCall = false
-            route == CALL -> {
-                viewModel.endCall()
-                route = backTab
-            }
+            route == CALL -> leaveCall(end = true)
             route == THREAD -> route = backTab
             else -> route = HOME
         }
@@ -292,6 +306,8 @@ fun SakloloApp(viewModel: SakloloViewModel) {
             return
         }
         rememberTab()
+        callFrom = KolNav.backTarget(route, callFrom)
+        callPeer = id
         peerId = id
         quickCall = false
         viewModel.placeCall(id)
@@ -356,10 +372,7 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                     CALL -> KolCall(
                         call = call,
                         inRange = contacts.firstOrNull { it.deviceId == call.peerId }?.inRange == true,
-                        onBack = {
-                            viewModel.endCall()
-                            route = backTab
-                        },
+                        onBack = { leaveCall(end = true) },
                         onSpeaker = { viewModel.setSpeaker(!call.speakerOn) },
                         onUrgent = { viewModel.sendUrgent(call.peerId, call.emergency.orEmpty()) },
                         onDismiss = viewModel::dismissEmergency,
@@ -371,15 +384,9 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                         },
                         onHoldEnd = viewModel::stopHold,
                         onMute = viewModel::setHoldMuted,
-                        onEnd = {
-                            viewModel.endCall()
-                            route = backTab
-                        },
+                        onEnd = { leaveCall(end = true) },
                         onAccept = viewModel::acceptCall,
-                        onDecline = {
-                            viewModel.declineCall()
-                            route = backTab
-                        },
+                        onDecline = { leaveCall(end = false) },
                         chips = chipsFor(call.peerId, callHeard, callReplies),
                         onChip = { chip ->
                             callReplies.replied(call.peerId, callHeard, ReplyChannel.CHIP)

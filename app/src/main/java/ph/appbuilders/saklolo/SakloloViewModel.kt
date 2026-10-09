@@ -23,6 +23,7 @@ import kotlinx.coroutines.withContext
 import ph.appbuilders.saklolo.contact.CaptionDisplay
 import ph.appbuilders.saklolo.contact.CallMachine
 import ph.appbuilders.saklolo.contact.CallPhase
+import ph.appbuilders.saklolo.contact.CallSession
 import ph.appbuilders.saklolo.contact.CallState
 import ph.appbuilders.saklolo.contact.ClipPlay
 import ph.appbuilders.saklolo.contact.Hangup
@@ -58,6 +59,7 @@ import ph.appbuilders.saklolo.relay.NearbyPeer
 import ph.appbuilders.saklolo.relay.QrCodec
 import ph.appbuilders.saklolo.stt.ModelInstaller
 import ph.appbuilders.saklolo.stt.PcmRecorder
+import ph.appbuilders.saklolo.stt.SpeechHearing
 import ph.appbuilders.saklolo.stt.SpeechLanguage
 import ph.appbuilders.saklolo.stt.WhisperTranscriber
 import ph.appbuilders.saklolo.summary.GemmaSummarizer
@@ -112,6 +114,8 @@ data class CallUi(
     val playing: Boolean = false,
     val captions: List<CaptionLine> = emptyList(),
     val emergency: String? = null,
+    val muted: Boolean = false,
+    val callId: Long = 0L,
 )
 
 data class DemoConfig(
@@ -198,7 +202,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
                 val model = ModelInstaller.ensure(app) { progress ->
                     _sos.update { it.copy(modelStatus = progress) }
                 }
-                transcriber = WhisperTranscriber(model)
+                transcriber = WhisperTranscriber(ModelInstaller.resolve(app).takeIf { it.exists() } ?: model)
                 _sos.update {
                     it.copy(
                         modelReady = true,
@@ -274,9 +278,14 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         return AskEngine.parse(json).also { askBank = it }
     }
 
-    fun onTranscriptChange(text: String) {
+    fun onTranscriptChange(text: String, raw: String? = null) {
         draftGeneration++
-        val triage = TriageEngine.triage(text)
+        val shown = TriageEngine.triage(text)
+        val triage = if (raw.isNullOrBlank() || raw.trim() == text.trim()) {
+            shown
+        } else {
+            SpeechHearing.higher(shown, TriageEngine.triage(raw))
+        }
         _sos.update {
             it.copy(
                 transcript = text,
@@ -433,11 +442,8 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         val engine = transcriber ?: error("Speech model is not loaded")
-        val language = _sos.value.language
-        val text = withContext(Dispatchers.Default) {
-            engine.transcribe(pcm, language.whisperCode)
-        }
-        if (text.isBlank()) {
+        val heard = hear(engine, pcm)
+        if (heard.raw.isBlank()) {
             _sos.update {
                 it.copy(
                     canUndo = false,
@@ -448,8 +454,8 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         lastPcm = pcm
-        onTranscriptChange(text)
-        refineWithGemma(text, draftGeneration)
+        onTranscriptChange(heard.shown, heard.raw)
+        refineWithGemma(heard.shown, draftGeneration)
     }
 
     private fun refineWithGemma(transcript: String, generation: Int) {
@@ -809,10 +815,8 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         }
         if (session != voiceSession) return
         _voice.update { it.copy(recording = false, status = "Transcribing…", transcript = "") }
-        val text = withContext(Dispatchers.Default) {
-            engine.transcribe(pcm, _sos.value.language.whisperCode)
-        }
-        when (val decision = VoiceDraft.decide(epoch, voiceEpoch, text)) {
+        val heard = hear(engine, pcm)
+        when (val decision = VoiceDraft.decide(epoch, voiceEpoch, heard.raw)) {
             is VoiceDraft.Finish.Discarded -> {
                 discardVoiceSession(session)
                 return
@@ -841,7 +845,13 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
                         audioPath?.let { File(it).delete() }
                         return
                     }
-                    sendDirect(peer, decision.body.take(800), kind = "voice", audioPath = audioPath)
+                    sendDirect(
+                        peer,
+                        heard.shown.take(800),
+                        kind = "voice",
+                        audioPath = audioPath,
+                        rawBody = heard.raw.take(800),
+                    )
                     voicePeer = null
                     _voice.value = VoiceUiState()
                     return
@@ -855,12 +865,12 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
                     id = id,
                     groupId = group.id,
                     sender = runtime.settings.displayName,
-                    body = decision.body.take(800),
+                    body = heard.shown.take(800),
                     createdAtMillis = System.currentTimeMillis(),
                     audioPath = audioPath,
                     lat = location?.first,
                     lon = location?.second,
-                    urgency = GroupTriage.labelVoice(decision.body),
+                    urgency = heard.urgency.takeUnless { it == Urgency.SAFE },
                     kind = "voice",
                 )
                 if (session != voiceSession) {
@@ -1024,7 +1034,13 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun sendDirect(to: String, body: String, kind: String = "text", audioPath: String? = null) {
+    fun sendDirect(
+        to: String,
+        body: String,
+        kind: String = "text",
+        audioPath: String? = null,
+        rawBody: String? = null,
+    ) {
         val trimmed = body.trim()
         if (to.isBlank() || (trimmed.isEmpty() && kind == "text")) return
         viewModelScope.launch(Dispatchers.IO) {
@@ -1037,6 +1053,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
                 createdAtMillis = System.currentTimeMillis(),
                 kind = kind,
                 audioPath = audioPath,
+                rawBody = rawBody?.trim()?.ifEmpty { null },
             )
             runtime.directStore.addLocal(message)
             runtime.relay.broadcastDirect(message)
@@ -1054,7 +1071,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
             _notice.value = "Not in range right now"
             return
         }
-        holdMuted = false
+        holdMuted = HoldMute.keep(holdMuted)
         syncClock()
         ring.inviteOut(peerId, row.name)
         applyRing()
@@ -1066,7 +1083,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
 
     fun acceptCall() {
         if (call.peerId.isBlank()) return
-        holdMuted = false
+        holdMuted = HoldMute.keep(holdMuted)
         syncClock()
         ring.accept(runtime.directMessages.value, deviceId())
         applyRing()
@@ -1076,10 +1093,12 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun declineCall() {
+        val holdingNow = _call.value.holding
         syncClock()
         ring.decline(runtime.directMessages.value, deviceId())
         applyRing()
         flushRingSends()
+        finishHoldOnEnd(holdingNow)
         releaseCallAudio()
         publishCall(emergency = null)
     }
@@ -1090,8 +1109,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         ring.end(runtime.directMessages.value, deviceId())
         applyRing()
         flushRingSends()
-        if (holdingNow) stopHold()
-        holdMuted = false
+        finishHoldOnEnd(holdingNow)
         releaseCallAudio()
         publishCall(emergency = null)
     }
@@ -1104,7 +1122,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
 
     fun dismissEmergency() {
         runtime.directStore.thread(deviceId(), call.peerId)
-            .filter { it.kind == Ptt.CLIP && Ptt.emergency(it.body) }
+            .filter { it.kind == Ptt.CLIP && Ptt.either(it.body, it.rawBody) }
             .forEach { dismissedEmergency += it.id }
         publishCall(emergency = null)
     }
@@ -1120,6 +1138,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     fun setHoldMuted(muted: Boolean) {
         holdMuted = muted
         if (HoldMute.dropInFlight(muted)) discardHold()
+        publishCall()
     }
 
     fun startHold() {
@@ -1175,16 +1194,15 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
             transcribingHold = true
             publishCall()
             val engine = transcriber
-            val text = if (engine == null || pcm.size < PcmRecorder.SAMPLE_RATE / 2) {
-                ""
+            val heard = if (engine == null || pcm.size < PcmRecorder.SAMPLE_RATE / 2) {
+                SpeechHearing.interpret("")
             } else {
-                withContext(Dispatchers.Default) {
-                    engine.transcribe(pcm, _sos.value.language.whisperCode)
-                }
+                hear(engine, pcm)
             }
             if (session != holdSession || holdMuted) return@launch
             transcribingHold = false
-            val body = text.trim()
+            val body = heard.shown.trim()
+            val raw = heard.raw.trim()
             if (body.isNotEmpty() && peer.isNotBlank()) {
                 val id = java.util.UUID.randomUUID().toString()
                 val audioPath = withContext(Dispatchers.IO) { ClipStore.write(runtime.clipsDir, id, pcm) }
@@ -1198,13 +1216,14 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
                     createdAtMillis = System.currentTimeMillis(),
                     kind = Ptt.CLIP,
                     audioPath = audioPath,
+                    rawBody = raw.take(800).ifEmpty { null },
                 )
                 withContext(Dispatchers.IO) {
                     runtime.directStore.addLocal(message)
                     runtime.relay.broadcastDirect(message)
                     runtime.refreshDirect()
                 }
-                if (Ptt.emergency(body)) publishCall(emergency = body)
+                if (Ptt.either(body, raw)) publishCall(emergency = body)
             }
             publishCall()
         }
@@ -1244,9 +1263,33 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun noteCall(next: CallState) {
+        callSerial = CallSession.nextId(
+            wasIdle = call.phase == CallPhase.IDLE,
+            nowIdle = next.phase == CallPhase.IDLE,
+            currentId = callSerial,
+        )
         call = next
         ring.adopt(call)
     }
+
+    /** A muted hold is dropped. Mute itself clears only after the call is idle. */
+    private fun finishHoldOnEnd(holdingNow: Boolean) {
+        if (HoldMute.dropInFlight(holdMuted) && (holdingNow || holding || recorder.isRunning)) {
+            discardHold()
+        } else if (holdingNow || holding) {
+            stopHold()
+        }
+        holdMuted = HoldMute.afterEnd()
+    }
+
+    private suspend fun hear(engine: WhisperTranscriber, pcm: FloatArray): SpeechHearing {
+        val names = contactNames()
+        val raw = withContext(Dispatchers.Default) { engine.transcribe(pcm, _sos.value.language.whisperCode, names) }
+        return SpeechHearing.interpret(raw, names)
+    }
+
+    private fun contactNames(): List<String> =
+        runtime.directStore.rows().filter { it.saved }.map { it.name }
 
     private fun applyRing() {
         val next = ring.call
@@ -1271,14 +1314,17 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     private var transcribingHold = false
     private var holdElapsed = 0
     private var holdSession = 0
+    private var callSerial = 0L
     private var holdStartedAt = 0L
     private var savedMusicVolume = -1
 
     private fun absorbSignals(messages: List<DirectMessage>) {
         val myId = deviceId()
+        val wasLive = call.phase != CallPhase.IDLE
         syncClock()
         val startRing = ring.absorb(messages, myId)
         applyRing()
+        if (wasLive && call.phase == CallPhase.IDLE) finishHoldOnEnd(holding || _call.value.holding)
         if (startRing) watchRing()
         for (message in messages.sortedBy { it.createdAtMillis }) {
             if (message.kind != Ptt.CLIP || message.toDeviceId != myId) continue
@@ -1298,7 +1344,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         val emergency = if (call.phase == CallPhase.ACTIVE) {
             runtime.directStore.thread(myId, call.peerId)
                 .filter { it.kind == Ptt.CLIP && it.id !in dismissedEmergency }
-                .lastOrNull { Ptt.emergency(it.body) }
+                .lastOrNull { Ptt.either(it.body, it.rawBody) }
                 ?.body
         } else {
             null
@@ -1340,6 +1386,8 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
             playing = call.playing,
             captions = captions,
             emergency = emergency,
+            muted = holdMuted,
+            callId = callSerial,
         )
     }
 
