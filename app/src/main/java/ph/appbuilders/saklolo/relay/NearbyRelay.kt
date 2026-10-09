@@ -224,7 +224,7 @@ class NearbyRelay(
             temp.delete()
             return
         }
-        deleteSharedOriginal(shared)
+        deleteSharedOriginal(uri)
         val alertId = synchronized(clipLock) {
             val known = payloadToAlert[payloadId]
             if (known == null) {
@@ -243,18 +243,11 @@ class NearbyRelay(
         sweepPending()
     }
 
-    /** Drops the Nearby download once the bytes are in app storage. Skips it when the file is locked. */
-    @Suppress("DEPRECATION")
-    private fun deleteSharedOriginal(shared: Payload.File) {
-        val javaFile = try {
-            shared.asJavaFile()
-        } catch (error: Throwable) {
-            Log.w(TAG, "shared clip is not accessible", error)
-            null
-        }
-        if (javaFile == null || !javaFile.exists()) return
-        if (!javaFile.delete()) {
-            Log.w(TAG, "could not delete shared clip ${javaFile.name}")
+    /** Drops the Nearby download once the bytes are in app storage. A locked URI is left alone. */
+    private fun deleteSharedOriginal(uri: android.net.Uri) {
+        try {
+            appContext.contentResolver.delete(uri, null, null)
+        } catch (_: Exception) {
         }
     }
 

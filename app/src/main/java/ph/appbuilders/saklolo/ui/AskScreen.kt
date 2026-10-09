@@ -25,7 +25,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -37,8 +36,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -61,7 +58,6 @@ import ph.appbuilders.saklolo.ui.theme.InkSoft
 import ph.appbuilders.saklolo.ui.theme.LightRed
 import ph.appbuilders.saklolo.ui.theme.PillAmberBg
 import ph.appbuilders.saklolo.ui.theme.PillAmberText
-import ph.appbuilders.saklolo.ui.theme.PlayerWash
 
 @Composable
 fun AskScreen(
@@ -76,7 +72,6 @@ fun AskScreen(
     val suggestions = remember(bank) { AskEngine.suggestions(bank) }
     var draft by remember { mutableStateOf("") }
     val scroll = rememberScrollState()
-    val focus = remember { FocusRequester() }
 
     fun ask(text: String) {
         if (text.isBlank()) return
@@ -128,8 +123,6 @@ fun AskScreen(
             draft = draft,
             onDraft = { draft = it },
             onSend = { ask(draft) },
-            onMic = { focus.requestFocus() },
-            focus = focus,
         )
     }
 }
@@ -160,8 +153,6 @@ private fun AskInput(
     draft: String,
     onDraft: (String) -> Unit,
     onSend: () -> Unit,
-    onMic: () -> Unit,
-    focus: FocusRequester,
 ) {
     Row(
         modifier = Modifier
@@ -180,7 +171,7 @@ private fun AskInput(
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
             keyboardActions = KeyboardActions(onSend = { onSend() }),
-            modifier = Modifier.weight(1f).focusRequester(focus),
+            modifier = Modifier.weight(1f),
             decorationBox = { inner ->
                 Box {
                     if (draft.isEmpty()) Text("Type a question…", color = InkSoft, fontSize = 14.sp)
@@ -188,16 +179,6 @@ private fun AskInput(
                 }
             },
         )
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(PlayerWash)
-                .clickable(onClick = onMic),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(Icons.Filled.Mic, contentDescription = "Focus the question", tint = Ink)
-        }
         Box(
             modifier = Modifier
                 .padding(start = 6.dp)

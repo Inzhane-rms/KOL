@@ -82,7 +82,7 @@ fun SosScreen(
     onOpenAlerts: () -> Unit,
     micBlocked: Boolean = false,
     micGranted: Boolean = true,
-    preciseBlocked: Boolean = false,
+    locationWarning: String? = null,
     onOpenAppSettings: () -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -98,8 +98,8 @@ fun SosScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         StatusPills(state.gemmaLoading, peers.size, location, onOpenSettings)
-        if (preciseBlocked) {
-            PreciseLocationCard(onOpenAppSettings)
+        locationWarning?.let { detail ->
+            LocationWarningCard(detail, onOpenAppSettings)
         }
         Text(
             "Emergency help needed?",
@@ -225,6 +225,31 @@ private fun StatusPills(gemmaLoading: Boolean, peers: Int, location: Pair<Double
 
 @Composable
 private fun MicBlockedCard(onOpenAppSettings: () -> Unit) {
+    PermissionCard(
+        icon = Icons.Filled.Mic,
+        title = "Kailangan ang mikropono",
+        detail = "Allow mic access to record an SOS.",
+        onOpenAppSettings = onOpenAppSettings,
+    )
+}
+
+@Composable
+private fun LocationWarningCard(detail: String, onOpenAppSettings: () -> Unit) {
+    PermissionCard(
+        icon = Icons.Filled.LocationOn,
+        title = "Kailangan ang lokasyon",
+        detail = detail,
+        onOpenAppSettings = onOpenAppSettings,
+    )
+}
+
+@Composable
+private fun PermissionCard(
+    icon: ImageVector,
+    title: String,
+    detail: String,
+    onOpenAppSettings: () -> Unit,
+) {
     Column(
         Modifier.fillMaxWidth().softCard(RoundedCornerShape(24.dp)).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -234,11 +259,11 @@ private fun MicBlockedCard(onOpenAppSettings: () -> Unit) {
                 Modifier.size(40.dp).clip(CircleShape).background(LightRed),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Filled.Mic, contentDescription = null, tint = Accent, modifier = Modifier.size(20.dp))
+                Icon(icon, contentDescription = null, tint = Accent, modifier = Modifier.size(20.dp))
             }
             Column(verticalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.weight(1f)) {
-                Text("Kailangan ang mikropono", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                Text("Allow mic access to record an SOS.", color = InkSoft, fontSize = 13.sp)
+                Text(title, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text(detail, color = InkSoft, fontSize = 13.sp)
             }
         }
         Text(
@@ -252,24 +277,6 @@ private fun MicBlockedCard(onOpenAppSettings: () -> Unit) {
                 .clickable(onClick = onOpenAppSettings)
                 .padding(horizontal = 16.dp, vertical = 10.dp),
         )
-    }
-}
-
-@Composable
-private fun PreciseLocationCard(onOpenAppSettings: () -> Unit) {
-    SettingsCard(
-        "Location is set to Approximate. Choose Precise in settings so nearby phones can find this one.",
-        onOpenAppSettings,
-    )
-}
-
-@Composable
-private fun SettingsCard(message: String, onOpenAppSettings: () -> Unit) {
-    Column(Modifier.flatCard(Color.White).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(message, color = Ink, fontSize = 16.sp)
-        TextButton(onClick = onOpenAppSettings, modifier = Modifier.height(48.dp)) {
-            Text("Open settings", color = Accent, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-        }
     }
 }
 

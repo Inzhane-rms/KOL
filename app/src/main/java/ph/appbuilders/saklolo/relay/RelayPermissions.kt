@@ -38,21 +38,32 @@ object RelayPermissions {
     fun needsPreciseChoice(sdkInt: Int, fine: Boolean, coarse: Boolean): Boolean =
         sdkInt in Build.VERSION_CODES.S until Build.VERSION_CODES.TIRAMISU && coarse && !fine
 
+    /**
+     * Copy for the settings card when location is why the relay cannot start.
+     * API 33+ with both fine and coarse denied, or API 31–32 with only coarse.
+     */
+    fun locationWarning(sdkInt: Int, fine: Boolean, coarse: Boolean): String? = when {
+        sdkInt >= Build.VERSION_CODES.TIRAMISU && !fine && !coarse ->
+            "Allow location so nearby phones can find this one."
+        needsPreciseChoice(sdkInt, fine, coarse) ->
+            "Choose Precise so nearby phones can find this one."
+        else -> null
+    }
+
     fun granted(context: Context, sdkInt: Int = Build.VERSION.SDK_INT): Boolean {
         if (required(sdkInt).any { !isGranted(context, it) }) return false
-        return locationSatisfied(
-            sdkInt,
-            fine = isGranted(context, Manifest.permission.ACCESS_FINE_LOCATION),
-            coarse = isGranted(context, Manifest.permission.ACCESS_COARSE_LOCATION),
-        )
+        return locationSatisfied(sdkInt, fine(context), coarse(context))
     }
 
     fun needsPreciseChoice(context: Context, sdkInt: Int = Build.VERSION.SDK_INT): Boolean =
-        needsPreciseChoice(
-            sdkInt,
-            fine = isGranted(context, Manifest.permission.ACCESS_FINE_LOCATION),
-            coarse = isGranted(context, Manifest.permission.ACCESS_COARSE_LOCATION),
-        )
+        needsPreciseChoice(sdkInt, fine(context), coarse(context))
+
+    fun locationWarning(context: Context, sdkInt: Int = Build.VERSION.SDK_INT): String? =
+        locationWarning(sdkInt, fine(context), coarse(context))
+
+    private fun fine(context: Context) = isGranted(context, Manifest.permission.ACCESS_FINE_LOCATION)
+
+    private fun coarse(context: Context) = isGranted(context, Manifest.permission.ACCESS_COARSE_LOCATION)
 
     private fun isGranted(context: Context, permission: String): Boolean =
         ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED

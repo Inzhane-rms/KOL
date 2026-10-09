@@ -5,6 +5,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import ph.appbuilders.saklolo.audio.WavPcm
@@ -103,6 +104,18 @@ class ReviewFixesTest {
         assertFalse(RelayPermissions.needsPreciseChoice(31, fine = true, coarse = true))
         assertFalse(RelayPermissions.needsPreciseChoice(31, fine = false, coarse = false))
         assertFalse(RelayPermissions.needsPreciseChoice(26, fine = false, coarse = true))
+        assertEquals(
+            "Allow location so nearby phones can find this one.",
+            RelayPermissions.locationWarning(33, fine = false, coarse = false),
+        )
+        assertNull(RelayPermissions.locationWarning(33, fine = false, coarse = true))
+        assertNull(RelayPermissions.locationWarning(33, fine = true, coarse = false))
+        assertEquals(
+            "Choose Precise so nearby phones can find this one.",
+            RelayPermissions.locationWarning(31, fine = false, coarse = true),
+        )
+        assertNull(RelayPermissions.locationWarning(31, fine = false, coarse = false))
+        assertNull(RelayPermissions.locationWarning(26, fine = false, coarse = false))
     }
 
     @Test
