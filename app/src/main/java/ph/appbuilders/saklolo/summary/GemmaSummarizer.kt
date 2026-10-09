@@ -9,6 +9,10 @@ import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import ph.appbuilders.saklolo.ask.AskEngine
 import ph.appbuilders.saklolo.triage.SummaryChoice
 import ph.appbuilders.saklolo.triage.SummaryRefine
@@ -16,8 +20,13 @@ import ph.appbuilders.saklolo.triage.SummaryRefine
 /**
  * Optional Gemma 3 1B int4 summary via MediaPipe LLM Inference.
  * The `.task` file is sideloaded, never bundled. Keyword rules stay the default
- * when the file is missing, RAM is short, the call errors, or 15 seconds pass.
- * Urgency is not decided here.
+ * when the file is missing, RAM is short, two attempts fail, or inference
+ * takes longer than 15 seconds. Urgency is not decided here.
+ *
+ * Load starts in the background at app start when the file exists and RAM is
+ * at least 3.4 GiB. The 15 second limit wraps [generateResponse] only, so the
+ * first alert is not stuck behind model creation. One failure is retried on
+ * the next alert. The second failure stops further attempts.
  *
  * Advertised 4 GB phones often report about 3.4–3.8 GiB. The gate is 3.4 GiB
  * so a Camon 40 still qualifies and a 3 GB phone does not.
@@ -25,18 +34,42 @@ import ph.appbuilders.saklolo.triage.SummaryRefine
 object GemmaSummarizer {
     private const val TAG = "SakloloGemma"
     private const val FILE_NAME = "gemma3-1b-it-int4.task"
-    private val RAM_FLOOR = 3_400L * 1024L * 1024L
-    private const val TIMEOUT_SECONDS = 15L
 
-    private val executor = Executors.newSingleThreadExecutor()
-    private val loadLock = Any()
+    private val policy = GemmaAttemptPolicy()
+    private val executor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "saklolo-gemma")
+    }
+    private val _loading = MutableStateFlow(false)
+    val loading: StateFlow<Boolean> = _loading.asStateFlow()
+
+    @Volatile
     private var engine: LlmInference? = null
-    private var unavailable = false
+
+    fun preload(context: Context) {
+        if (!eligible(context)) return
+        if (!policy.beginLoad()) return
+        publish()
+        val appContext = context.applicationContext
+        executor.execute {
+            var ok = false
+            try {
+                ok = createEngine(appContext)
+            } catch (error: Exception) {
+                Log.w(TAG, "model load failed", error)
+            } finally {
+                policy.finishLoad(ok)
+                publish()
+            }
+        }
+    }
 
     fun mightRun(context: Context): Boolean {
-        if (unavailable) return false
-        return findModel(context) != null && hasEnoughRam(context)
+        if (policy.gaveUp) return false
+        return eligible(context)
     }
+
+    /** True when a summary call can run now, without waiting for a load. */
+    fun isReady(): Boolean = engine != null && !policy.gaveUp
 
     fun describe(context: Context): String {
         val file = findModel(context)
@@ -44,79 +77,87 @@ object GemmaSummarizer {
         if (!hasEnoughRam(context)) {
             return "Gemma file found, but this phone reports under about 4 GB of RAM. Summaries use keyword rules."
         }
-        if (unavailable) return "Gemma file found, but it did not load. Summaries use keyword rules."
+        if (policy.gaveUp) return "Gemma hit an error twice. Summaries use keyword rules."
         if (engine != null) return "Gemma 3 1B is loaded. It can refine the one-line summary."
-        return "Gemma file found at ${file.parentFile?.name ?: "files"}. It loads on the next alert."
+        if (policy.showLoading) return "Gemma is loading in the background."
+        return "Gemma file found at ${file.parentFile?.name ?: "files"}. It loads in the background at app start."
     }
 
     /**
      * Picks a stored Ask B-LINK pair id, or null for NONE / anything that is not
      * a valid id. The model string is never returned to the screen.
+     * This does not wait for a load. The 15 second limit wraps the index call only.
      */
     fun chooseAskPair(context: Context, question: String, catalog: String, validIds: Set<Int>): Int? {
-        if (!mightRun(context)) return null
-        val future = executor.submit<Int?> {
-            try {
-                val llm = ensureEngine(context) ?: return@submit null
-                AskEngine.parsePairChoice(askIndex(llm, question, catalog), validIds)
-            } catch (error: Exception) {
-                Log.w(TAG, "ask index failed", error)
+        val llm = engine
+        return when (policy.plan(eligible(context), llm != null)) {
+            GemmaRefinePlan.SKIP -> null
+            GemmaRefinePlan.RULES_WITHOUT_WAITING -> {
+                preload(context)
                 null
             }
-        }
-        return try {
-            future.get(TIMEOUT_SECONDS, TimeUnit.SECONDS)
-        } catch (_: TimeoutException) {
-            future.cancel(true)
-            null
-        } catch (error: Exception) {
-            Log.w(TAG, "ask index wait failed", error)
-            null
+            GemmaRefinePlan.INFER -> {
+                val ready = llm ?: return null
+                infer(null) {
+                    AskEngine.parsePairChoice(askIndex(ready, question, catalog), validIds)
+                }
+            }
         }
     }
 
     fun refine(context: Context, transcript: String, rulesSummary: String): SummaryChoice {
         val rules = SummaryChoice(rulesSummary, SummaryRefine.RULES)
-        if (!mightRun(context)) return rules
-        val future = executor.submit<SummaryChoice> {
-            try {
-                val llm = ensureEngine(context) ?: return@submit rules
-                SummaryRefine.choose(rulesSummary, ask(llm, transcript))
-            } catch (error: Exception) {
-                Log.w(TAG, "summary failed", error)
-                unavailable = true
+        val llm = engine
+        return when (policy.plan(eligible(context), llm != null)) {
+            GemmaRefinePlan.SKIP -> rules
+            GemmaRefinePlan.RULES_WITHOUT_WAITING -> {
+                preload(context)
                 rules
             }
-        }
-        return try {
-            future.get(TIMEOUT_SECONDS, TimeUnit.SECONDS)
-        } catch (_: TimeoutException) {
-            future.cancel(true)
-            rules
-        } catch (error: Exception) {
-            Log.w(TAG, "summary wait failed", error)
-            rules
+            GemmaRefinePlan.INFER -> {
+                val ready = llm ?: return rules
+                infer(rules) {
+                    SummaryRefine.choose(rulesSummary, ask(ready, transcript))
+                }
+            }
         }
     }
 
-    private fun ensureEngine(context: Context): LlmInference? {
-        engine?.let { return it }
-        synchronized(loadLock) {
-            engine?.let { return it }
-            if (unavailable) return null
-            val file = findModel(context) ?: return null
-            return try {
-                val options = LlmInference.LlmInferenceOptions.builder()
-                    .setModelPath(file.absolutePath)
-                    .setMaxTokens(1280)
-                    .build()
-                LlmInference.createFromOptions(context.applicationContext, options).also { engine = it }
+    private fun <T> infer(fallback: T, block: () -> T): T {
+        val timedOut = AtomicBoolean(false)
+        val future = executor.submit<T> {
+            try {
+                val value = block()
+                if (!timedOut.get()) policy.noteInferenceSuccess()
+                value
             } catch (error: Exception) {
-                Log.w(TAG, "model load failed", error)
-                unavailable = true
-                null
+                Log.w(TAG, "inference failed", error)
+                if (!timedOut.get()) policy.noteInferenceFailure()
+                fallback
             }
         }
+        return try {
+            future.get(GemmaAttemptPolicy.INFERENCE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        } catch (_: TimeoutException) {
+            timedOut.set(true)
+            policy.noteInferenceTimeout()
+            future.cancel(true)
+            fallback
+        } catch (error: Exception) {
+            Log.w(TAG, "inference wait failed", error)
+            fallback
+        }
+    }
+
+    private fun createEngine(context: Context): Boolean {
+        if (engine != null) return true
+        val file = findModel(context) ?: return false
+        val options = LlmInference.LlmInferenceOptions.builder()
+            .setModelPath(file.absolutePath)
+            .setMaxTokens(1280)
+            .build()
+        engine = LlmInference.createFromOptions(context, options)
+        return engine != null
     }
 
     private fun ask(llm: LlmInference, transcript: String): String {
@@ -164,6 +205,13 @@ object GemmaSummarizer {
         Transcript: ${transcript.take(800)}
     """.trimIndent()
 
+    private fun publish() {
+        _loading.value = policy.showLoading
+    }
+
+    private fun eligible(context: Context): Boolean =
+        findModel(context) != null && hasEnoughRam(context)
+
     private fun findModel(context: Context): File? {
         val external = context.getExternalFilesDir(null)?.let { File(it, FILE_NAME) }
         val internal = File(context.filesDir, FILE_NAME)
@@ -174,6 +222,6 @@ object GemmaSummarizer {
         val manager = context.getSystemService(ActivityManager::class.java) ?: return false
         val info = ActivityManager.MemoryInfo()
         manager.getMemoryInfo(info)
-        return info.totalMem >= RAM_FLOOR
+        return info.totalMem >= GemmaAttemptPolicy.RAM_FLOOR_BYTES
     }
 }

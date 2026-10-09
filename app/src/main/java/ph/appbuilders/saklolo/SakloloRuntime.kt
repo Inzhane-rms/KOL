@@ -14,6 +14,7 @@ import ph.appbuilders.saklolo.model.AlertStore
 import ph.appbuilders.saklolo.relay.NearbyPeer
 import ph.appbuilders.saklolo.relay.NearbyRelay
 import ph.appbuilders.saklolo.relay.PeerFilter
+import ph.appbuilders.saklolo.summary.GemmaSummarizer
 
 /**
  * Process-wide alert log and Nearby relay. The foreground service and the
@@ -54,6 +55,7 @@ class SakloloRuntime private constructor(val app: Application) {
             },
         )
         relay.setFilter(settings.peerFilter())
+        GemmaSummarizer.preload(app)
     }
 
     fun ensureRelay() {

@@ -91,6 +91,17 @@ fun SosScreen(
                     .glass(20.dp)
                     .padding(horizontal = 12.dp, vertical = 8.dp),
             )
+            if (state.gemmaLoading) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "AI loading…",
+                    color = InkSoft,
+                    fontSize = 13.sp,
+                    modifier = Modifier
+                        .glass(20.dp)
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+            }
         }
         if (state.actionable && state.urgency != null) {
             DraftCard(state, onTranscript, onSend, onDiscard)
