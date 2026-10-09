@@ -1,0 +1,197 @@
+{
+ "sources": {
+  "H": "Disaster Preparedness & First Aid Handbook, climate.gov.ph/files/Disaster_Preparedness_First_Aid_Handbook.pdf",
+  "U": "UNICEF Philippines, Emergency preparedness tips: typhoons, unicef.org/philippines/emergency-preparedness-tips-typhoons"
+ },
+ "medical_override": {
+  "triggers": [
+   "dugo",
+   "dumudugo",
+   "sugat",
+   "walang malay",
+   "nahimatay",
+   "hindi humihinga",
+   "nalulunod",
+   "bleeding",
+   "unconscious",
+   "not breathing",
+   "drowning",
+   "samad",
+   "wala nanginhawa",
+   "nakuryente",
+   "nakuryentehan",
+   "electrocuted",
+   "naipit",
+   "nadaganan",
+   "trapped",
+   "crushed",
+   "di makahinga",
+   "hindi makahinga",
+   "can't breathe",
+   "cant breathe",
+   "atake sa puso",
+   "heart attack",
+   "chest pain",
+   "nalunod",
+   "lunod",
+   "nalumos",
+   "bali",
+   "broken bone"
+  ],
+  "answer_tl": "Emergency ito. Mag-SOS ngayon.",
+  "answer_en": "This is an emergency. Send an SOS now.",
+  "action": "open_recorder"
+ },
+ "pairs": [
+  {
+   "id": 1,
+   "q_tl": "Pwede ba tumawid sa baha?",
+   "q_en": "Can I cross the flood?",
+   "a_tl": "Huwag. Huwag tumawid sa umaagos na tubig o bahang lampas tuhod.",
+   "a_en": "No. Don't cross flowing water or floods above the knee.",
+   "src": "H"
+  },
+  {
+   "id": 2,
+   "q_tl": "Pwede ba magmaneho sa baha?",
+   "q_en": "Can I drive through a flood?",
+   "a_tl": "Huwag magmaneho sa bahang kalsada. Iwasan ang di-kailangang biyahe.",
+   "a_en": "Don't drive through flooded streets. Avoid needless trips.",
+   "src": "H"
+  },
+  {
+   "id": 3,
+   "q_tl": "Ano ang gagawin habang may bagyo?",
+   "q_en": "What do I do during the typhoon?",
+   "a_tl": "Manatili sa loob, maging kalmado, at makinig sa balita.",
+   "a_en": "Stay indoors, stay calm, and follow the news.",
+   "src": "H,U"
+  },
+  {
+   "id": 4,
+   "q_tl": "Kailan ako dapat lumikas?",
+   "q_en": "When should I evacuate?",
+   "a_tl": "Lumikas agad kapag may babala ang PAGASA, LGU, o barangay.",
+   "a_en": "Evacuate right away when PAGASA, your LGU, or barangay warns.",
+   "src": "U"
+  },
+  {
+   "id": 5,
+   "q_tl": "Ano ang gagawin bago lumikas?",
+   "q_en": "What do I do before evacuating?",
+   "a_tl": "Patayin ang kuryente, isara ang gas, at i-lock ang pinto.",
+   "a_en": "Turn off the power, shut the gas, and lock the doors.",
+   "src": "U,H"
+  },
+  {
+   "id": 6,
+   "q_tl": "Saan ako dapat pumunta kung bahain ang lugar?",
+   "q_en": "Where do I go if my area floods?",
+   "a_tl": "Pumunta sa pinakamalapit na evacuation center.",
+   "a_en": "Go to the nearest designated evacuation center.",
+   "src": "H"
+  },
+  {
+   "id": 7,
+   "q_tl": "Anong lugar ang dapat iwasan?",
+   "q_en": "Which places should I avoid?",
+   "a_tl": "Iwasan ang ilog, sapa, baybayin, at dalisdis. Puwedeng magka-landslide.",
+   "a_en": "Avoid riverbanks, creeks, coasts, and slopes. Landslides can happen.",
+   "src": "H"
+  },
+  {
+   "id": 8,
+   "q_tl": "May nahulog na kable ng kuryente.",
+   "q_en": "There's a downed power line.",
+   "a_tl": "Lumayo sa nahulog na kable ng kuryente.",
+   "a_en": "Stay away from downed power lines.",
+   "src": "H"
+  },
+  {
+   "id": 9,
+   "q_tl": "Pwede bang gamitin ang appliance na nabasa sa baha?",
+   "q_en": "Can I use appliances that got flooded?",
+   "a_tl": "Huwag gamitin ang gas o electrical na appliance na nabaha.",
+   "a_en": "Don't use gas or electrical appliances that were flooded.",
+   "src": "H"
+  },
+  {
+   "id": 10,
+   "q_tl": "Pwede bang gumamit ng kuryente habang baha?",
+   "q_en": "Can I use electrical equipment during a flood?",
+   "a_tl": "Huwag gumamit ng electrical equipment habang may baha.",
+   "a_en": "Don't operate electrical equipment during a flood.",
+   "src": "H"
+  },
+  {
+   "id": 12,
+   "q_tl": "Ano ang laman ng go-bag?",
+   "q_en": "What goes in a go-bag?",
+   "a_tl": "Gamot, ready-to-eat na pagkain, tubig, flashlight, cash, at dokumento.",
+   "a_en": "Medicine, ready-to-eat food, water, a flashlight, cash, and documents.",
+   "src": "U,H"
+  },
+  {
+   "id": 13,
+   "q_tl": "Paano ihanda ang bahay bago ang bagyo?",
+   "q_en": "How do I prepare my house before the typhoon?",
+   "a_tl": "Ayusin ang bubong, pinto, at bintana. Putulin ang delikadong sanga.",
+   "a_en": "Fix the roof, doors, and windows. Trim branches that could fall.",
+   "src": "U,H"
+  },
+  {
+   "id": 14,
+   "q_tl": "Saan ilalagay ang gamit kung babaha?",
+   "q_en": "Where do I put my things if it floods?",
+   "a_tl": "Itaas ang gamit sa lugar na hindi aabutin ng baha.",
+   "a_en": "Move belongings above the expected flood level.",
+   "src": "H,U"
+  },
+  {
+   "id": 15,
+   "q_tl": "Babalik ako sa bahay para sa gamit.",
+   "q_en": "I'm going back home for my things.",
+   "a_tl": "Huwag muna. Bumalik lang kapag sinabi ng LGU na ligtas na.",
+   "a_en": "Not yet. Return only when your LGU says it's safe.",
+   "src": "U"
+  },
+  {
+   "id": 16,
+   "q_tl": "Ligtas na ba bumalik?",
+   "q_en": "Is it safe to go back now?",
+   "a_tl": "Bumalik lang kapag sinabi ng LGU na ligtas na.",
+   "a_en": "Return only when your LGU says it's safe.",
+   "src": "U"
+  },
+  {
+   "id": 17,
+   "q_tl": "Paano ko ihahanda ang phone ko?",
+   "q_en": "How do I prepare my phone?",
+   "a_tl": "I-full charge ang phone at powerbank bago ang bagyo.",
+   "a_en": "Fully charge your phone and power bank before the storm.",
+   "src": "U"
+  },
+  {
+   "id": 18,
+   "q_tl": "Takot ang mga bata. Ano ang gagawin?",
+   "q_en": "The kids are scared. What do I do?",
+   "a_tl": "Ipaliwanag nang mahinahon ang plano para hindi sila matakot.",
+   "a_en": "Calmly explain the family's plan so they feel safe.",
+   "src": "U"
+  },
+  {
+   "id": 19,
+   "q_tl": "Saan ako mag-uulat ng baha?",
+   "q_en": "Where do I report flooding?",
+   "a_tl": "I-report sa inyong lokal na DRRM office o barangay.",
+   "a_en": "Report it to your local DRRM office or barangay.",
+   "src": "H"
+  }
+ ],
+ "no_match": {
+  "a_tl": "Wala akong sagot dito. Sumunod sa LGU o barangay.",
+  "a_en": "I don't have an answer for this. Follow your LGU or barangay."
+ },
+ "disclaimer_en": "General safety tips only. Always follow your LGU and responders.",
+ "disclaimer_tl": "Pangkalahatang tips lang ito. Laging sumunod sa LGU at responders."
+}

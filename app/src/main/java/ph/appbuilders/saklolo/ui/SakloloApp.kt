@@ -13,6 +13,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -60,6 +61,7 @@ import ph.appbuilders.saklolo.ui.theme.ForestMint
 import ph.appbuilders.saklolo.ui.theme.Ink
 
 private const val RECORD = "record"
+private const val ASK = "ask"
 private const val FEED = "feed"
 
 @Composable
@@ -112,11 +114,14 @@ fun SakloloApp(viewModel: SakloloViewModel) {
     ) {
         Column(Modifier.fillMaxSize()) {
             Header(
+                route = route,
                 peerCount = peers.size,
                 onSettings = { settingsOpen = true },
             )
             Box(Modifier.weight(1f)) {
-                if (route == RECORD) {
+                if (route == ASK) {
+                    AskScreen(onOpenRecorder = { route = RECORD })
+                } else if (route == RECORD) {
                     SosScreen(
                         state = sos,
                         peers = peers,
@@ -155,8 +160,9 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                 }
             }
             BottomSwitcher(
-                recordSelected = route == RECORD,
+                route = route,
                 onRecord = { route = RECORD },
+                onAsk = { route = ASK },
                 onFeed = { route = FEED },
             )
         }
@@ -178,7 +184,8 @@ fun SakloloApp(viewModel: SakloloViewModel) {
 }
 
 @Composable
-private fun Header(peerCount: Int, onSettings: () -> Unit) {
+private fun Header(route: String, peerCount: Int, onSettings: () -> Unit) {
+    val asking = route == ASK
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -186,19 +193,27 @@ private fun Header(peerCount: Int, onSettings: () -> Unit) {
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("B-LINK", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        Text(
+            text = if (asking) "Ask B-LINK" else "B-LINK",
+            color = Color.White,
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold,
+        )
         Spacer(Modifier.weight(1f))
         Text(
-            text = formatNearby(peerCount),
+            text = if (asking) "Offline · tips only" else formatNearby(peerCount),
             color = Color.White,
             fontSize = 14.sp,
             modifier = Modifier
                 .clip(CircleShape)
                 .background(Color.White.copy(alpha = 0.16f))
+                .border(1.dp, Color.White.copy(alpha = 0.35f), CircleShape)
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         )
-        IconButton(onClick = onSettings, modifier = Modifier.size(56.dp)) {
-            Icon(Icons.Filled.Settings, contentDescription = "Settings", tint = Color.White)
+        if (!asking) {
+            IconButton(onClick = onSettings, modifier = Modifier.size(56.dp)) {
+                Icon(Icons.Filled.Settings, contentDescription = "Settings", tint = Color.White)
+            }
         }
     }
 }

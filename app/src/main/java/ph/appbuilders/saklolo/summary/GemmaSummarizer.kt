@@ -9,6 +9,7 @@ import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
+import ph.appbuilders.saklolo.ask.AskEngine
 import ph.appbuilders.saklolo.triage.SummaryChoice
 import ph.appbuilders.saklolo.triage.SummaryRefine
 
@@ -46,6 +47,32 @@ object GemmaSummarizer {
         if (unavailable) return "Gemma file found, but it did not load. Summaries use keyword rules."
         if (engine != null) return "Gemma 3 1B is loaded. It can refine the one-line summary."
         return "Gemma file found at ${file.parentFile?.name ?: "files"}. It loads on the next alert."
+    }
+
+    /**
+     * Picks a stored Ask B-LINK pair id, or null for NONE / anything that is not
+     * a valid id. The model string is never returned to the screen.
+     */
+    fun chooseAskPair(context: Context, question: String, catalog: String, validIds: Set<Int>): Int? {
+        if (!mightRun(context)) return null
+        val future = executor.submit<Int?> {
+            try {
+                val llm = ensureEngine(context) ?: return@submit null
+                AskEngine.parsePairChoice(askIndex(llm, question, catalog), validIds)
+            } catch (error: Exception) {
+                Log.w(TAG, "ask index failed", error)
+                null
+            }
+        }
+        return try {
+            future.get(TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        } catch (_: TimeoutException) {
+            future.cancel(true)
+            null
+        } catch (error: Exception) {
+            Log.w(TAG, "ask index wait failed", error)
+            null
+        }
     }
 
     fun refine(context: Context, transcript: String, rulesSummary: String): SummaryChoice {
@@ -100,6 +127,29 @@ object GemmaSummarizer {
         val session = LlmInferenceSession.createFromOptions(llm, sessionOptions)
         return try {
             session.addQueryChunk(prompt(transcript))
+            session.generateResponse()
+        } finally {
+            session.close()
+        }
+    }
+
+    private fun askIndex(llm: LlmInference, question: String, catalog: String): String {
+        val sessionOptions = LlmInferenceSession.LlmInferenceSessionOptions.builder()
+            .setTopK(1)
+            .setTemperature(0f)
+            .build()
+        val session = LlmInferenceSession.createFromOptions(llm, sessionOptions)
+        return try {
+            session.addQueryChunk(
+                """
+                Match the question to one stored safety pair.
+                Reply with one token only: the pair id, or NONE.
+                Do not write an answer.
+                Question: ${question.take(400)}
+                Pairs:
+                $catalog
+                """.trimIndent(),
+            )
             session.generateResponse()
         } finally {
             session.close()

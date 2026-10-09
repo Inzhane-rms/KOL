@@ -217,7 +217,12 @@ private fun PulseRing(progress: Float) {
 }
 
 @Composable
-fun BottomSwitcher(recordSelected: Boolean, onRecord: () -> Unit, onFeed: () -> Unit) {
+fun BottomSwitcher(
+    route: String,
+    onRecord: () -> Unit,
+    onAsk: () -> Unit,
+    onFeed: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .navigationBarsPadding()
@@ -228,8 +233,9 @@ fun BottomSwitcher(recordSelected: Boolean, onRecord: () -> Unit, onFeed: () -> 
             .padding(4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        SwitchTab("Record", recordSelected, Modifier.weight(1f), onRecord)
-        SwitchTab("Responder feed", !recordSelected, Modifier.weight(1f), onFeed)
+        SwitchTab("Record", route == "record", Modifier.weight(1f), onRecord)
+        SwitchTab("Ask", route == "ask", Modifier.weight(1f), onAsk)
+        SwitchTab("Feed", route == "feed", Modifier.weight(1f), onFeed)
     }
 }
 
