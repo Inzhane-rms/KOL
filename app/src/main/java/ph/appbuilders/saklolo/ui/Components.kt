@@ -163,6 +163,7 @@ fun SosOrb(
     var pressed by remember { mutableStateOf(false) }
     val recordingNow by rememberUpdatedState(recording)
     val enabledNow by rememberUpdatedState(enabled)
+    val elapsedNow by rememberUpdatedState(elapsedSec)
     val startNow by rememberUpdatedState(onHoldStart)
     val endNow by rememberUpdatedState(onHoldEnd)
     val cancelNow by rememberUpdatedState(onHoldCancel)
@@ -250,7 +251,7 @@ fun SosOrb(
                         pressed = true
                         if (!recordingNow) startNow()
                         val width = size.width.toFloat()
-                        val height = size.height.toFloat()
+                        val slopPx = CANCEL_PAST_EDGE_DP.dp.toPx()
                         var outcome = SosHoldEnd.Release
                         try {
                             while (true) {
@@ -258,13 +259,22 @@ fun SosOrb(
                                 event.changes.forEach { it.consume() }
                                 val change = event.changes.firstOrNull { it.id == down.id }
                                 val decision = if (change == null) {
-                                    sosHoldEnd(pointerPressed = true, outOfBounds = false, cancelled = true)
+                                    sosHoldEnd(
+                                        pointerPressed = true,
+                                        distancePastEdgePx = 0f,
+                                        cancelSlopPx = slopPx,
+                                        elapsedMs = elapsedNow * 1_000L,
+                                        cancelled = true,
+                                    )
                                 } else {
-                                    val outside = change.position.x < 0f ||
-                                        change.position.y < 0f ||
-                                        change.position.x > width ||
-                                        change.position.y > height
-                                    sosHoldEnd(change.pressed, outside, cancelled = false)
+                                    val past = distancePastButtonEdge(change.position.x, change.position.y, width)
+                                    sosHoldEnd(
+                                        pointerPressed = change.pressed,
+                                        distancePastEdgePx = past,
+                                        cancelSlopPx = slopPx,
+                                        elapsedMs = elapsedNow * 1_000L,
+                                        cancelled = false,
+                                    )
                                 }
                                 if (decision != SosHoldEnd.Continue) {
                                     outcome = decision

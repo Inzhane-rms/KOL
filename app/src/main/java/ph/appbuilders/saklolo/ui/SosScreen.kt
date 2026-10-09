@@ -16,7 +16,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
@@ -25,6 +27,7 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -60,6 +63,7 @@ fun SosScreen(
     onHoldStart: () -> Unit,
     onHoldEnd: () -> Unit,
     onHoldCancel: () -> Unit,
+    onUndo: () -> Unit,
     onTranscript: (String) -> Unit,
     onSend: () -> Unit,
     onDiscard: () -> Unit,
@@ -71,13 +75,18 @@ fun SosScreen(
     locationWarning: String? = null,
     onOpenAppSettings: () -> Unit = {},
 ) {
+    val scroll = rememberScrollState()
+    LaunchedEffect(state.actionable, state.canUndo) {
+        if (state.actionable || state.canUndo) scroll.animateScrollTo(scroll.maxValue)
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(scroll)
             .statusBarsPadding()
             .padding(horizontal = 20.dp)
             .navigationBarsPadding()
-            .padding(bottom = 140.dp),
+            .padding(bottom = 116.dp + 32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         StatusPills(state.gemmaLoading, peers.size, location)
@@ -112,7 +121,7 @@ fun SosScreen(
         state.error?.let { error ->
             Text(error, color = InkSoft, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp))
         }
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.height(12.dp))
         SosOrb(
             recording = state.recording,
             elapsedSec = state.elapsedSec,
@@ -122,7 +131,11 @@ fun SosScreen(
             onHoldCancel = onHoldCancel,
             dimmed = !micGranted,
         )
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.height(12.dp))
+        if (state.canUndo) {
+            UndoCard(onUndo)
+            Spacer(Modifier.height(12.dp))
+        }
         if (state.recording) {
             Text(
                 holdLabel(true, state.elapsedSec),
@@ -236,6 +249,28 @@ private fun LevelBars(level: Float) {
                     .clip(RoundedCornerShape(2.5.dp))
                     .background(if (index < 14) Accent else Color(0xFFC9CDD6)),
             )
+        }
+    }
+}
+
+@Composable
+private fun UndoCard(onUndo: () -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().softCard(RoundedCornerShape(24.dp)).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("Cancelled · Undo", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+                .clip(RoundedCornerShape(28.dp))
+                .background(Ink)
+                .clickable(onClick = onUndo),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("Undo", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
         }
     }
 }

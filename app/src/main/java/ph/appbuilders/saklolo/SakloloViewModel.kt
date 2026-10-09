@@ -50,6 +50,7 @@ data class SosUiState(
     val gemmaStatus: String = "",
     val gemmaLoading: Boolean = false,
     val micLevel: Float = 0f,
+    val canUndo: Boolean = false,
 )
 
 data class DemoConfig(
@@ -71,6 +72,8 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     private var lastPcm: FloatArray? = null
     private var draftGeneration = 0
     private var recordGeneration = 0
+    private var undoGeneration = 0
+    private var heldPcm: FloatArray? = null
     private var player: MediaPlayer? = null
 
     val alerts: StateFlow<List<Alert>> = runtime.alerts
@@ -203,6 +206,8 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
             _sos.update { it.copy(error = failure, status = "Could not record") }
             return
         }
+        heldPcm = null
+        undoGeneration += 1
         recordingStartedAt = System.currentTimeMillis()
         recordGeneration += 1
         val generation = recordGeneration
@@ -213,6 +218,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
                 micLevel = 0f,
                 error = null,
                 sentAlertId = null,
+                canUndo = false,
                 status = "Listening… speak the SOS",
             )
         }
@@ -231,74 +237,54 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Slide-away and other cancels drop the clip. They do not transcribe or send. */
+    /** A far slide or a system cancel keeps the clip until [ph.appbuilders.saklolo.ui.CANCEL_UNDO_MS]. */
     fun cancelRecording() {
         recordGeneration += 1
+        undoGeneration += 1
+        val ticket = undoGeneration
         viewModelScope.launch {
             if (!recordGate.tryLock()) return@launch
-            try {
+            val pcm = try {
                 if (!_sos.value.recording && !recorder.isRunning) return@launch
                 runtime.relay.onLocalRecordingFinished()
                 recorder.stop()
-                _sos.update {
-                    it.copy(
-                        recording = false,
-                        elapsedSec = 0,
-                        micLevel = 0f,
-                        status = "Hold the button and speak. Tagalog, Bisaya, or English.",
-                        error = null,
-                    )
-                }
             } finally {
                 recordGate.unlock()
+            }
+            if (ticket != undoGeneration) return@launch
+            heldPcm = pcm
+            _sos.update {
+                it.copy(
+                    recording = false,
+                    elapsedSec = 0,
+                    micLevel = 0f,
+                    canUndo = true,
+                    status = "Cancelled · Undo",
+                    error = null,
+                )
+            }
+            delay(ph.appbuilders.saklolo.ui.CANCEL_UNDO_MS)
+            if (ticket != undoGeneration) return@launch
+            heldPcm = null
+            _sos.update { state ->
+                if (!state.canUndo) state else state.copy(
+                    canUndo = false,
+                    status = "Hold the button and speak. Tagalog, Bisaya, or English.",
+                )
             }
         }
     }
 
-    fun stopRecording() {
+    /** Restore the cancelled clip and transcribe it the same way a release does. */
+    fun undoCancel() {
+        val pcm = heldPcm ?: return
+        heldPcm = null
+        undoGeneration += 1
         viewModelScope.launch {
             if (!recordGate.tryLock()) return@launch
             try {
-                if (!_sos.value.recording && !recorder.isRunning) return@launch
-                runtime.relay.onLocalRecordingFinished()
-                _sos.update { it.copy(recording = false, status = "Transcribing on this phone…", error = null) }
-                val pcm = recorder.stop()
-                if (pcm.size < PcmRecorder.SAMPLE_RATE / 2) {
-                    _sos.update {
-                        it.copy(
-                            status = "Recording was too short",
-                            error = "Hold the button a little longer and speak clearly.",
-                        )
-                    }
-                    return@launch
-                }
-                val peak = pcm.maxOf { abs(it) }
-                if (peak < 0.01f) {
-                    _sos.update {
-                        it.copy(
-                            status = "Too quiet",
-                            error = "The mic barely heard anything. Move closer and try again.",
-                        )
-                    }
-                    return@launch
-                }
-                val engine = transcriber ?: error("Speech model is not loaded")
-                val language = _sos.value.language
-                val text = withContext(Dispatchers.Default) {
-                    engine.transcribe(pcm, language.whisperCode)
-                }
-                if (text.isBlank()) {
-                    _sos.update {
-                        it.copy(
-                            status = "No speech recognized",
-                            error = "Try again, or type the SOS below.",
-                        )
-                    }
-                    return@launch
-                }
-                lastPcm = pcm
-                onTranscriptChange(text)
-                refineWithGemma(text, draftGeneration)
+                _sos.update { it.copy(canUndo = false, recording = false, status = "Transcribing on this phone…", error = null) }
+                finishRecording(pcm)
             } catch (error: Exception) {
                 _sos.update {
                     it.copy(status = "Transcription failed", error = error.message ?: "Unknown error")
@@ -307,6 +293,70 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
                 recordGate.unlock()
             }
         }
+    }
+
+    fun stopRecording() {
+        heldPcm = null
+        undoGeneration += 1
+        viewModelScope.launch {
+            if (!recordGate.tryLock()) return@launch
+            try {
+                if (!_sos.value.recording && !recorder.isRunning) return@launch
+                runtime.relay.onLocalRecordingFinished()
+                _sos.update {
+                    it.copy(recording = false, canUndo = false, micLevel = 0f, status = "Transcribing on this phone…", error = null)
+                }
+                finishRecording(recorder.stop())
+            } catch (error: Exception) {
+                _sos.update {
+                    it.copy(status = "Transcription failed", error = error.message ?: "Unknown error")
+                }
+            } finally {
+                recordGate.unlock()
+            }
+        }
+    }
+
+    private suspend fun finishRecording(pcm: FloatArray) {
+        if (pcm.size < PcmRecorder.SAMPLE_RATE / 2) {
+            _sos.update {
+                it.copy(
+                    canUndo = false,
+                    status = "Recording was too short",
+                    error = "Hold the button a little longer and speak clearly.",
+                )
+            }
+            return
+        }
+        val peak = pcm.maxOf { abs(it) }
+        if (peak < 0.01f) {
+            _sos.update {
+                it.copy(
+                    canUndo = false,
+                    status = "Too quiet",
+                    error = "The mic barely heard anything. Move closer and try again.",
+                )
+            }
+            return
+        }
+        val engine = transcriber ?: error("Speech model is not loaded")
+        val language = _sos.value.language
+        val text = withContext(Dispatchers.Default) {
+            engine.transcribe(pcm, language.whisperCode)
+        }
+        if (text.isBlank()) {
+            _sos.update {
+                it.copy(
+                    canUndo = false,
+                    status = "No speech recognized",
+                    error = "Try again, or type the SOS below.",
+                )
+            }
+            return
+        }
+        lastPcm = pcm
+        onTranscriptChange(text)
+        refineWithGemma(text, draftGeneration)
     }
 
     private fun refineWithGemma(transcript: String, generation: Int) {
@@ -379,6 +429,8 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     fun discardDraft() {
         draftGeneration++
         lastPcm = null
+        heldPcm = null
+        undoGeneration += 1
         _sos.update {
             it.copy(
                 transcript = "",
@@ -389,6 +441,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
                 status = "Hold the button and speak. Tagalog, Bisaya, or English.",
                 error = null,
                 sentAlertId = null,
+                canUndo = false,
             )
         }
     }

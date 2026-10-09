@@ -64,8 +64,6 @@ fun AskScreen(
     turns: List<AskTurn>,
     onAsk: (String) -> Unit,
     onOpenRecorder: () -> Unit,
-    seed: String? = null,
-    onSeedConsumed: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val bank = remember { loadBank(context) }
@@ -77,12 +75,6 @@ fun AskScreen(
         if (text.isBlank()) return
         draft = ""
         onAsk(text)
-    }
-
-    LaunchedEffect(seed) {
-        val text = questionToAutoSend(seed) ?: return@LaunchedEffect
-        ask(text)
-        onSeedConsumed()
     }
 
     LaunchedEffect(turns.size) {
