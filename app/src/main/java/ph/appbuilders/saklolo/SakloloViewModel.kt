@@ -41,8 +41,10 @@ import ph.appbuilders.saklolo.contact.Ptt
 import ph.appbuilders.saklolo.contact.RingLoop
 import ph.appbuilders.saklolo.contact.ClipCommit
 import ph.appbuilders.saklolo.contact.VoiceControl
+import ph.appbuilders.saklolo.contact.DeleteTap
 import ph.appbuilders.saklolo.contact.WipeLaunch
 import ph.appbuilders.saklolo.contact.WipeSessions
+import ph.appbuilders.saklolo.contact.WipeUi
 import ph.appbuilders.saklolo.ask.AskEngine
 import ph.appbuilders.saklolo.ask.AskResult
 import ph.appbuilders.saklolo.ask.AskTurn
@@ -194,6 +196,8 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     val notice: StateFlow<String?> = _notice.asStateFlow()
     private val _wipeEpoch = MutableStateFlow(0)
     val wipeEpoch: StateFlow<Int> = _wipeEpoch.asStateFlow()
+    private val _wipeUi = MutableStateFlow(WipeUi(inProgress = false, needsAgreement = !runtime.settings.termsAccepted))
+    val wipeUi: StateFlow<WipeUi> = _wipeUi.asStateFlow()
 
     init {
         viewModelScope.launch {
@@ -586,10 +590,14 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
 
     fun acceptTerms() {
         runtime.settings.termsAccepted = true
+        _wipeUi.value = _wipeUi.value.accepted()
     }
 
     /** Clears local messages, contacts, clips, and preferences. The speech model file stays. */
     fun deleteAllData(onCleared: () -> Unit = {}) {
+        val running = _wipeUi.value
+        if (!DeleteTap.accept(running.inProgress)) return
+        _wipeUi.value = running.started()
         val next = WipeSessions(holdSession, voiceEpoch, voiceSession, recordGeneration).bump()
         voiceEpoch = next.epoch
         voiceSession = next.voice
@@ -669,6 +677,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
                 _threads.value = emptyList()
                 _wipeEpoch.value += 1
                 _notice.value = null
+                _wipeUi.value = _wipeUi.value.finished()
                 onCleared()
             }
         }

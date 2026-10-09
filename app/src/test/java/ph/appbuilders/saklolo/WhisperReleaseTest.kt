@@ -7,14 +7,14 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import ph.appbuilders.saklolo.stt.PendingAbort
+import ph.appbuilders.saklolo.stt.DecodeMark
 import ph.appbuilders.saklolo.stt.TranscriptLimit
 import ph.appbuilders.saklolo.stt.WhisperEngine
 import ph.appbuilders.saklolo.stt.WhisperTranscriber
@@ -82,12 +82,15 @@ class WhisperReleaseTest {
     }
 
     @Test
-    fun abortRequestedBeforeADecodeStartsAbortsThatDecodeAndTheNextOneRuns() = runBlocking {
+    fun abortThenTheNextTranscriptionSucceeds() = runBlocking {
         val calls = AtomicInteger(0)
+        val nativeAborts = AtomicInteger(0)
         val engine = object : WhisperEngine {
             override fun initContext(modelPath: String): Long = 1L
             override fun freeContext(contextPtr: Long) = Unit
-            override fun requestAbort() = Unit
+            override fun requestAbort() {
+                nativeAborts.incrementAndGet()
+            }
             override fun clearPendingAbort() = Unit
             override fun transcribe(
                 contextPtr: Long,
@@ -107,22 +110,56 @@ class WhisperReleaseTest {
         }
         val transcriber = WhisperTranscriber(File("model.bin"), engine, worker)
         transcriber.abort()
-        assertEquals(TranscriptLimit.UNAVAILABLE, transcriber.transcribe(floatArrayOf(0.2f), "tl"))
-        assertEquals(0, calls.get())
         assertEquals("tabang", transcriber.transcribe(floatArrayOf(0.2f), "tl"))
         assertEquals(1, calls.get())
+        assertEquals(0, nativeAborts.get())
         worker.shutdown()
     }
 
     @Test
-    fun pendingAbortStaysSetUntilTheNextDecodeConsumesIt() {
-        val pending = PendingAbort()
-        assertFalse(pending.consume())
-        pending.request()
-        pending.request()
-        assertTrue(pending.consume())
-        assertFalse(pending.consume())
-        pending.request()
-        assertTrue(pending.consume())
+    fun abortMidDecodeCancelsThatDecodeAndTheNextOneRuns() = runBlocking {
+        val started = CountDownLatch(1)
+        val finish = CountDownLatch(1)
+        val nativeAbort = AtomicInteger(0)
+        val calls = AtomicInteger(0)
+        val engine = object : WhisperEngine {
+            override fun initContext(modelPath: String): Long = 1L
+            override fun freeContext(contextPtr: Long) = Unit
+            override fun requestAbort() {
+                nativeAbort.set(1)
+            }
+            override fun clearPendingAbort() {
+                nativeAbort.set(0)
+            }
+            override fun transcribe(
+                contextPtr: Long,
+                audio: FloatArray,
+                threads: Int,
+                language: String,
+                prompt: String,
+                beam: Int,
+                budgetMs: Long,
+            ): String {
+                val call = calls.incrementAndGet()
+                if (call == 1) {
+                    started.countDown()
+                    assertTrue(finish.await(5, TimeUnit.SECONDS))
+                    return if (nativeAbort.get() == 1) DecodeMark.ABORT else "tabang"
+                }
+                return "tabang"
+            }
+        }
+        val worker = Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "saklolo-whisper")
+        }
+        val transcriber = WhisperTranscriber(File("model.bin"), engine, worker)
+        val first = async(Dispatchers.Default) { transcriber.transcribe(floatArrayOf(0.2f), "tl") }
+        assertTrue(started.await(5, TimeUnit.SECONDS))
+        transcriber.abort()
+        finish.countDown()
+        assertEquals(TranscriptLimit.UNAVAILABLE, first.await())
+        assertEquals("tabang", transcriber.transcribe(floatArrayOf(0.2f), "tl"))
+        assertEquals(2, calls.get())
+        worker.shutdown()
     }
 }

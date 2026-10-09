@@ -110,7 +110,8 @@ fun SakloloApp(viewModel: SakloloViewModel) {
     var quickCall by remember { mutableStateOf(false) }
     var nameDraft by remember { mutableStateOf(viewModel.displayName()) }
     var askName by remember { mutableStateOf(viewModel.needsNamePrompt()) }
-    var termsOk by remember { mutableStateOf(viewModel.termsAccepted()) }
+    val wipeUi by viewModel.wipeUi.collectAsStateWithLifecycle()
+    val needsAgreement = wipeUi.needsAgreement
     var legalPage by remember { mutableStateOf<String?>(null) }
     var settingsOpen by remember { mutableStateOf(false) }
     var aboutOpen by remember { mutableStateOf(false) }
@@ -258,10 +259,20 @@ fun SakloloApp(viewModel: SakloloViewModel) {
         if (next == THREAD && peer.isNotBlank()) peerId = peer
         route = next
     }
-    BackHandler(enabled = legalPage != null || !termsOk || showSetup || askName || quickCall || route != HOME) {
+    LaunchedEffect(needsAgreement) {
+        if (!needsAgreement) return@LaunchedEffect
+        askName = viewModel.needsNamePrompt()
+        nameDraft = viewModel.displayName()
+        settingsOpen = false
+        aboutOpen = false
+        legalPage = null
+        route = HOME
+        peerId = ""
+    }
+    BackHandler(enabled = legalPage != null || needsAgreement || showSetup || askName || quickCall || route != HOME) {
         when {
             legalPage != null -> legalPage = null
-            !termsOk -> Unit
+            needsAgreement -> Unit
             showSetup -> dismissSetup()
             askName -> Unit
             quickCall -> quickCall = false
@@ -530,7 +541,7 @@ fun SakloloApp(viewModel: SakloloViewModel) {
         }
     }
 
-    if (askName && termsOk && !showSetup) {
+    if (askName && !needsAgreement && !showSetup) {
         Dialog(
             onDismissRequest = {},
             properties = DialogProperties(
@@ -597,27 +608,17 @@ fun SakloloApp(viewModel: SakloloViewModel) {
     if (settingsOpen) {
         SettingsDialog(
             initial = viewModel.demoConfig(),
+            deleting = wipeUi.inProgress,
             onDismiss = { settingsOpen = false },
             onSave = { name, restrict, allowlist, language ->
                 viewModel.applyDemo(name, restrict, allowlist, language)
                 settingsOpen = false
             },
-            onDeleteAll = {
-                viewModel.deleteAllData {
-                    termsOk = false
-                    askName = viewModel.needsNamePrompt()
-                    nameDraft = viewModel.displayName()
-                    settingsOpen = false
-                    aboutOpen = false
-                    legalPage = null
-                    route = HOME
-                    peerId = ""
-                }
-            },
+            onDeleteAll = { viewModel.deleteAllData() },
         )
     }
 
-    if (!termsOk) {
+    if (needsAgreement) {
         Dialog(
             onDismissRequest = {},
             properties = DialogProperties(
@@ -630,7 +631,6 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                 onOpen = { legalPage = it },
                 onContinue = {
                     viewModel.acceptTerms()
-                    termsOk = true
                     startRelay(context)
                 },
             )

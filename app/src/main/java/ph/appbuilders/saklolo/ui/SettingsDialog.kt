@@ -25,6 +25,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -47,6 +48,7 @@ import ph.appbuilders.saklolo.ui.theme.SafeGreen
 @Composable
 fun SettingsDialog(
     initial: DemoConfig,
+    deleting: Boolean = false,
     onDismiss: () -> Unit,
     onSave: (name: String, restrict: Boolean, allowlist: String, language: SpeechLanguage) -> Unit,
     onDeleteAll: () -> Unit,
@@ -102,7 +104,7 @@ fun SettingsDialog(
                 fontSize = 14.sp,
             )
             Text(initial.gemmaStatus, color = InkSoft, fontSize = 14.sp)
-            TextButton(onClick = { confirmDelete = true }, modifier = Modifier.height(56.dp)) {
+            TextButton(onClick = { confirmDelete = true }, enabled = !deleting, modifier = Modifier.height(56.dp)) {
                 Text(stringResource(R.string.legal_delete), color = Accent, fontFamily = Poppins, fontSize = 16.sp, fontWeight = FontWeight.Bold)
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -170,7 +172,8 @@ fun SettingsDialog(
                             .height(56.dp)
                             .clip(RoundedCornerShape(28.dp))
                             .background(Accent)
-                            .clickable {
+                            .alpha(if (deleting) 0.4f else 1f)
+                            .clickable(enabled = !deleting) {
                                 confirmDelete = false
                                 onDeleteAll()
                             },

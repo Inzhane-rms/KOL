@@ -225,7 +225,11 @@ fun interface SqlRunner {
     fun exec(sql: String)
 }
 
-/** Existing outgoing rows were already handed off. Their created time becomes the handoff time. */
+/**
+ * Outgoing rows are backfilled with their created time.
+ * direct_messages has no status or relayed column that records a Nearby handoff.
+ * localOrigin only means this phone created the row, and hops is a forward count.
+ */
 object SentAtMigration {
     const val ADD_COLUMN =
         "ALTER TABLE direct_messages ADD COLUMN sentAtMillis INTEGER NOT NULL DEFAULT 0"
@@ -239,6 +243,9 @@ object SentAtMigration {
 
     fun sentAt(localOrigin: Boolean, createdAtMillis: Long): Long =
         if (localOrigin) createdAtMillis else 0L
+
+    /** Null because no stored column records that Nearby accepted the payload. */
+    fun handoffColumn(): String? = null
 }
 
 val MIGRATION_6_7 = object : Migration(6, 7) {

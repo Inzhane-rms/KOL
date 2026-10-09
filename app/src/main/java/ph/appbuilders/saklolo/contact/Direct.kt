@@ -317,6 +317,20 @@ data class WipeSessions(val hold: Int, val epoch: Int, val voice: Int, val recor
     fun bump(): WipeSessions = WipeSessions(hold + 1, epoch + 1, voice + 1, record + 1)
 }
 
+/** A second Delete all data tap does nothing while the first wipe is still running. */
+object DeleteTap {
+    fun accept(inProgress: Boolean): Boolean = !inProgress
+}
+
+/** Agreement stays here so a recreated screen still shows it after the wipe. */
+data class WipeUi(val inProgress: Boolean, val needsAgreement: Boolean) {
+    fun started(): WipeUi = copy(inProgress = true)
+
+    fun finished(): WipeUi = copy(inProgress = false, needsAgreement = true)
+
+    fun accepted(): WipeUi = copy(needsAgreement = false)
+}
+
 /** The wipe must return while a transcription still holds the recorder lock. */
 object WipeLaunch {
     const val END_CALL_WINDOW_MS = 500L

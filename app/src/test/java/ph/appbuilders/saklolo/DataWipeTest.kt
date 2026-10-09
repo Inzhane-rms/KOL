@@ -7,6 +7,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import ph.appbuilders.saklolo.contact.DeleteTap
 import ph.appbuilders.saklolo.contact.ClipCommit
 import ph.appbuilders.saklolo.contact.DirectMessage
 import ph.appbuilders.saklolo.contact.DirectStore
@@ -15,6 +16,7 @@ import ph.appbuilders.saklolo.contact.ReplyCache
 import ph.appbuilders.saklolo.contact.ReplyChip
 import ph.appbuilders.saklolo.contact.WipeLaunch
 import ph.appbuilders.saklolo.contact.WipeSessions
+import ph.appbuilders.saklolo.contact.WipeUi
 import ph.appbuilders.saklolo.data.SentAtMigration
 import ph.appbuilders.saklolo.group.GroupNote
 import ph.appbuilders.saklolo.group.GroupPersistence
@@ -263,6 +265,36 @@ class DataWipeTest {
         assertTrue(SentAtMigration.MARK_OUTGOING.contains("localOrigin != 0"))
         assertEquals(4_000L, SentAtMigration.sentAt(localOrigin = true, createdAtMillis = 4_000L))
         assertEquals(0L, SentAtMigration.sentAt(localOrigin = false, createdAtMillis = 4_000L))
+        assertNull(SentAtMigration.handoffColumn())
+    }
+
+    @Test
+    fun aSecondDeleteIsIgnoredAndAgreementStaysAfterRotation() {
+        val idle = WipeUi(inProgress = false, needsAgreement = false)
+        assertTrue(DeleteTap.accept(idle.inProgress))
+        val running = idle.started()
+        assertFalse(DeleteTap.accept(running.inProgress))
+        val landed = running.finished()
+        assertFalse(landed.inProgress)
+        assertTrue(landed.needsAgreement)
+        val recreated = WipeUi(landed.inProgress, landed.needsAgreement)
+        assertTrue(recreated.needsAgreement)
+        assertFalse(recreated.accepted().needsAgreement)
+        val app = source(
+            "src/main/java/ph/appbuilders/saklolo/ui/SakloloApp.kt",
+            "app/src/main/java/ph/appbuilders/saklolo/ui/SakloloApp.kt",
+        )
+        val settings = source(
+            "src/main/java/ph/appbuilders/saklolo/ui/SettingsDialog.kt",
+            "app/src/main/java/ph/appbuilders/saklolo/ui/SettingsDialog.kt",
+        )
+        val model = viewModelSource()
+        assertFalse(app.contains("var termsOk by remember"))
+        assertTrue(app.contains("wipeUi.needsAgreement"))
+        assertTrue(app.contains("deleting = wipeUi.inProgress"))
+        assertTrue(settings.contains("enabled = !deleting"))
+        assertTrue(model.contains("DeleteTap.accept"))
+        assertTrue(model.contains(".finished()"))
     }
 
     private fun asset(name: String): String {
@@ -281,13 +313,13 @@ class DataWipeTest {
         return file.readText()
     }
 
-    private fun viewModelSource(): String {
-        val file = listOf(
-            File("src/main/java/ph/appbuilders/saklolo/SakloloViewModel.kt"),
-            File("app/src/main/java/ph/appbuilders/saklolo/SakloloViewModel.kt"),
-        ).first { it.exists() }
-        return file.readText()
-    }
+    private fun source(first: String, second: String): String =
+        listOf(File(first), File(second)).first { it.exists() }.readText()
+
+    private fun viewModelSource(): String = source(
+        "src/main/java/ph/appbuilders/saklolo/SakloloViewModel.kt",
+        "app/src/main/java/ph/appbuilders/saklolo/SakloloViewModel.kt",
+    )
 
     private fun themeXml(): String {
         val file = listOf(

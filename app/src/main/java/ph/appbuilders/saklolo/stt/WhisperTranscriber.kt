@@ -7,18 +7,29 @@ import ph.appbuilders.saklolo.audio.SpeechPrep
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.withContext
 
-/** An abort stays set until a decode starts, so a request that arrives early is not dropped. */
-internal class PendingAbort {
-    private val requested = AtomicBoolean(false)
+/**
+ * Each decode gets its own id. An abort covers only ids already opened.
+ * A later decode is a new id, so a leftover abort cannot mark it unavailable.
+ */
+internal class DecodeGeneration {
+    private val next = AtomicInteger(1)
+    private val abortedThrough = AtomicInteger(0)
 
-    fun request() {
-        requested.set(true)
+    fun open(): Int = next.getAndIncrement()
+
+    /** False when no decode is open. The caller must not leave a native abort set. */
+    fun abortOpen(): Boolean {
+        val latest = next.get() - 1
+        if (latest <= 0) return false
+        abortedThrough.updateAndGet { current -> maxOf(current, latest) }
+        return true
     }
 
-    fun consume(): Boolean = requested.getAndSet(false)
+    fun cancelled(id: Int): Boolean = id <= abortedThrough.get()
 }
 
 internal interface WhisperEngine {
@@ -124,22 +135,40 @@ class WhisperTranscriber internal constructor(
     private var contextPtr: Long = 0
     private var beamLoaded = false
     private var beamEarned = false
-    private val pendingAbort = PendingAbort()
+    private val generations = DecodeGeneration()
 
     fun abort() {
-        pendingAbort.request()
-        engine.requestAbort()
+        if (generations.abortOpen()) {
+            engine.requestAbort()
+        } else {
+            engine.clearPendingAbort()
+        }
     }
 
     @Suppress("UNUSED_PARAMETER")
-    suspend fun transcribe(pcm16k: FloatArray, languageCode: String, names: List<String> = emptyList()): String = withContext(dispatcher) {
-        if (released.get()) error("Speech model was released")
-        if (pendingAbort.consume()) {
-            engine.clearPendingAbort()
-            return@withContext TranscriptLimit.UNAVAILABLE
+    suspend fun transcribe(pcm16k: FloatArray, languageCode: String, names: List<String> = emptyList()): String {
+        val session = generations.open()
+        return try {
+            withContext(dispatcher) {
+                if (released.get()) error("Speech model was released")
+                if (generations.cancelled(session)) {
+                    engine.clearPendingAbort()
+                    return@withContext TranscriptLimit.UNAVAILABLE
+                }
+                engine.clearPendingAbort()
+                if (generations.cancelled(session)) {
+                    return@withContext TranscriptLimit.UNAVAILABLE
+                }
+                transcribeOpen(pcm16k, names)
+            }
+        } finally {
+            if (generations.cancelled(session)) engine.clearPendingAbort()
         }
+    }
+
+    private fun transcribeOpen(pcm16k: FloatArray, names: List<String>): String {
         val audio = SpeechPrep.prepare(pcm16k)
-        if (audio.isEmpty()) return@withContext ""
+        if (audio.isEmpty()) return ""
         if (contextPtr == 0L) {
             contextPtr = engine.initContext(modelFile.absolutePath)
             if (contextPtr == 0L) {
@@ -176,7 +205,7 @@ class WhisperTranscriber internal constructor(
                 "decode beam=$beam elapsed_ms=${(elapsed * 1000).toLong()} clip_ms=${(clipSeconds * 1000).toLong()} budget_ms=$budgetMs earned=$beamEarned aborted=$aborted",
             )
         }
-        DecodeMark.text(raw)
+        return DecodeMark.text(raw)
     }
 
     fun release() {
