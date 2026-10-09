@@ -31,6 +31,8 @@ import ph.appbuilders.saklolo.contact.ContactQr
 import ph.appbuilders.saklolo.contact.ContactRow
 import ph.appbuilders.saklolo.contact.Conversation
 import ph.appbuilders.saklolo.contact.DirectMessage
+import ph.appbuilders.saklolo.contact.QuickReplies
+import ph.appbuilders.saklolo.contact.ReplyChip
 import ph.appbuilders.saklolo.contact.Identity
 import ph.appbuilders.saklolo.contact.Ptt
 import ph.appbuilders.saklolo.contact.RingLoop
@@ -142,6 +144,9 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     val relayMessage: StateFlow<String> = runtime.relayMessage
     val contacts: StateFlow<List<ContactRow>> = runtime.contacts
     val directMessages: StateFlow<List<DirectMessage>> = runtime.directMessages
+
+    private val _modelReplies = MutableStateFlow<Map<String, List<ReplyChip>>>(emptyMap())
+    val modelReplies: StateFlow<Map<String, List<ReplyChip>>> = _modelReplies.asStateFlow()
 
     private val _voice = MutableStateFlow(VoiceUiState())
     val voice: StateFlow<VoiceUiState> = _voice.asStateFlow()
@@ -1003,6 +1008,17 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     fun markThreadRead(peerId: String) {
         threadRead[peerId] = System.currentTimeMillis()
         _threads.value = runtime.directStore.conversations(deviceId(), threadRead.toMap())
+    }
+
+    /** Rules show immediately. Gemma replaces them only when it is already loaded and the text parses. */
+    fun offerReplies(heard: String) {
+        val key = heard.trim()
+        if (key.isEmpty() || !GemmaSummarizer.isReady()) return
+        viewModelScope.launch(Dispatchers.Default) {
+            val raw = GemmaSummarizer.suggestReplies(key) ?: return@launch
+            val chips = QuickReplies.acceptModel(raw) ?: return@launch
+            _modelReplies.update { current -> current + (key to chips) }
+        }
     }
 
     fun sendDirect(to: String, body: String, kind: String = "text", audioPath: String? = null) {

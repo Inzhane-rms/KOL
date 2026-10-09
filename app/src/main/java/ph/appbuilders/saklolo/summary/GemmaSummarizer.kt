@@ -34,6 +34,7 @@ import ph.appbuilders.saklolo.triage.SummaryRefine
 object GemmaSummarizer {
     private const val TAG = "SakloloGemma"
     private const val FILE_NAME = "gemma3-1b-it-int4.task"
+    private const val REPLY_TIMEOUT_SECONDS = 8L
 
     private val policy = GemmaAttemptPolicy()
     private val executor = Executors.newSingleThreadExecutor { runnable ->
@@ -102,6 +103,46 @@ object GemmaSummarizer {
                     AskEngine.parsePairChoice(askIndex(ready, question, catalog), validIds)
                 }
             }
+        }
+    }
+
+    /**
+     * Two or three short reply lines, or null.
+     * Runs only when Gemma is already loaded and no other inference is in flight.
+     * A timeout or a bad reply returns null so the rules stay on screen.
+     */
+    fun suggestReplies(heard: String): String? {
+        if (heard.isBlank() || engine == null || policy.gaveUp) return null
+        if (!policy.tryBeginInference()) return null
+        val llm = engine ?: run {
+            policy.finishInference()
+            return null
+        }
+        val future = try {
+            executor.submit<String?> {
+                try {
+                    askReplies(llm, heard)
+                } catch (error: Exception) {
+                    Log.w(TAG, "reply suggestion failed", error)
+                    null
+                } finally {
+                    policy.finishInference()
+                }
+            }
+        } catch (error: Throwable) {
+            policy.finishInference()
+            Log.w(TAG, "reply suggestion submit failed", error)
+            return null
+        }
+        return try {
+            future.get(REPLY_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        } catch (_: TimeoutException) {
+            policy.noteInferenceTimeout()
+            future.cancel(true)
+            null
+        } catch (error: Exception) {
+            Log.w(TAG, "reply suggestion wait failed", error)
+            null
         }
     }
 
@@ -198,6 +239,27 @@ object GemmaSummarizer {
                 Question: ${question.take(400)}
                 Pairs:
                 $catalog
+                """.trimIndent(),
+            )
+            session.generateResponse()
+        } finally {
+            session.close()
+        }
+    }
+
+    private fun askReplies(llm: LlmInference, heard: String): String {
+        val sessionOptions = LlmInferenceSession.LlmInferenceSessionOptions.builder()
+            .setTopK(1)
+            .setTemperature(0f)
+            .build()
+        val session = LlmInferenceSession.createFromOptions(llm, sessionOptions)
+        return try {
+            session.addQueryChunk(
+                """
+                Write 2 or 3 short Tagalog replies to the message.
+                One reply per line. No numbers. No explanation.
+                Each line under 40 characters.
+                Message: ${heard.take(240)}
                 """.trimIndent(),
             )
             session.generateResponse()

@@ -174,6 +174,27 @@ object TriageEngine {
         return TriageResult(urgency, summary, actionable = true)
     }
 
+    /** True when the text hits the emergency vocabulary, not merely the default help bucket. */
+    fun mentionsEmergency(raw: String): Boolean {
+        val normalized = normalize(raw)
+        if (normalized.isBlank()) return false
+        val tokens = normalized.split(" ")
+        val trapped = hasUnnegated(tokens, trappedWords) || hasPhrase(tokens, trappedPhrases)
+        val injured = hasUnnegated(tokens, injuredWords)
+        val fire = hasUnnegated(tokens, fireWords)
+        val drowning = hasUnnegated(tokens, drownWords)
+        val notBreathing = hasWordsBetween(tokens, "hindi", "humihinga", maxBetween = 2) ||
+            hasWordsBetween(tokens, "di", "humihinga", maxBetween = 2)
+        val severe = hasUnnegated(tokens, severeWords) ||
+            hasPhrase(tokens, severePhrases) ||
+            unblockedPatayNa(tokens) ||
+            notBreathing
+        val flood = hasUnnegated(tokens, floodWords)
+        val crowd = hasUnnegated(tokens, crowdWords) || hasPhrase(tokens, crowdPhrases)
+        val help = hasUnnegated(tokens, helpWords) || flood || crowd
+        return trapped || injured || fire || drowning || severe || help
+    }
+
     private fun buildAlertSummary(
         tokens: List<String>,
         normalized: String,

@@ -6,6 +6,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -56,6 +59,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -72,6 +76,7 @@ import ph.appbuilders.saklolo.contact.ContactRow
 import ph.appbuilders.saklolo.contact.Conversation
 import ph.appbuilders.saklolo.contact.DirectMessage
 import ph.appbuilders.saklolo.contact.NameChoice
+import ph.appbuilders.saklolo.contact.ReplyChip
 import ph.appbuilders.saklolo.contact.Urgent
 import ph.appbuilders.saklolo.ui.theme.Accent
 import ph.appbuilders.saklolo.ui.theme.Amber
@@ -512,6 +517,8 @@ fun V17Thread(
     onFavorite: () -> Unit,
     onPlay: (String?) -> Unit,
     now: Long,
+    chips: List<ReplyChip>,
+    onChip: (ReplyChip) -> Unit,
 ) {
     Column(Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
         Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -563,6 +570,7 @@ fun V17Thread(
                 }
             }
         }
+        ReplyChips(chips, onChip)
         Row(
             Modifier.padding(top = 8.dp).fillMaxWidth().height(56.dp).clip(RoundedCornerShape(28.dp)).background(CardWhite).border(1.dp, Hairline, RoundedCornerShape(28.dp)).padding(start = 16.dp, end = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -665,6 +673,24 @@ private fun WaveBars(path: String?) {
 }
 
 @Composable
+private fun ReplyChips(chips: List<ReplyChip>, onTap: (ReplyChip) -> Unit) {
+    if (chips.isEmpty()) return
+    Row(
+        Modifier.padding(top = 8.dp).fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        chips.forEach { chip ->
+            Box(
+                Modifier.height(48.dp).clip(RoundedCornerShape(24.dp)).background(VioletLight).clickable { onTap(chip) }.padding(horizontal = 14.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(chip.label, color = VioletDeep, fontFamily = Poppins, fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1)
+            }
+        }
+    }
+}
+
+@Composable
 private fun UrgentBadge() {
     Text(
         Urgent.BADGE,
@@ -698,7 +724,10 @@ fun V17InCall(
     onEnd: () -> Unit,
     onAccept: () -> Unit,
     onDecline: () -> Unit,
+    chips: List<ReplyChip>,
+    onSendText: (String) -> Unit,
 ) {
+    var gateDraft by remember { mutableStateOf("") }
     Column(Modifier.fillMaxSize().padding(horizontal = 20.dp).navigationBarsPadding()) {
         Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Avatar(call.peerName, 40, inRange)
@@ -752,7 +781,33 @@ fun V17InCall(
                 Text("Hold to talk. Captions stay on this phone.", color = InkSoft, fontFamily = Poppins, fontSize = 13.sp, modifier = Modifier.padding(top = 12.dp))
             }
         }
-        Text("Clips play automatically · up to 0:10 each", color = InkSoft, fontFamily = Poppins, fontSize = 11.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
+        Text("Clips play automatically · up to 0:10 each", color = InkSoft, fontFamily = Poppins, fontSize = 11.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+        ReplyChips(chips) { chip ->
+            if (chip.fill) gateDraft = chip.sendText else onSendText(chip.sendText)
+        }
+        if (gateDraft.isNotEmpty()) {
+            Row(
+                Modifier.padding(bottom = 8.dp).fillMaxWidth().height(48.dp).clip(RoundedCornerShape(24.dp)).background(CardWhite).border(1.dp, Hairline, RoundedCornerShape(24.dp)).padding(start = 14.dp, end = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                BasicTextField(
+                    value = gateDraft,
+                    onValueChange = { gateDraft = it },
+                    modifier = Modifier.weight(1f),
+                    textStyle = TextStyle(color = Ink, fontFamily = Poppins, fontSize = 14.sp),
+                )
+                Box(
+                    Modifier.size(40.dp).clip(CircleShape).background(Violet).clickable {
+                        val text = gateDraft.trim()
+                        if (text.isNotEmpty()) onSendText(text)
+                        gateDraft = ""
+                    },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send", tint = Color.White, modifier = Modifier.size(16.dp))
+                }
+            }
+        }
         if (call.phase.name == "INCOMING") {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 18.dp)) {
                 Box(Modifier.weight(1f).height(56.dp).clip(RoundedCornerShape(28.dp)).background(CallBrush).clickable(onClick = onAccept), contentAlignment = Alignment.Center) {

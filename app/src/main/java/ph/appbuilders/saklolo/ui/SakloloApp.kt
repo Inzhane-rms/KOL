@@ -50,6 +50,7 @@ import com.journeyapps.barcodescanner.ScanOptions
 import ph.appbuilders.saklolo.SakloloViewModel
 import ph.appbuilders.saklolo.contact.CallPhase
 import ph.appbuilders.saklolo.contact.DirectGate
+import ph.appbuilders.saklolo.contact.QuickReplies
 import ph.appbuilders.saklolo.relay.ReadyToConnect
 import ph.appbuilders.saklolo.relay.RelayService
 import ph.appbuilders.saklolo.relay.SetupFacts
@@ -169,6 +170,16 @@ fun SakloloApp(viewModel: SakloloViewModel) {
     val threadMessages = messages.filter { message ->
         val other = if (viewModel.isMine(message)) message.toDeviceId else message.fromDeviceId
         other == peerId && message.kind in DirectGate.chatKinds
+    }
+    val modelReplies by viewModel.modelReplies.collectAsStateWithLifecycle()
+    val threadHeard = QuickReplies.latestHeard(threadMessages, viewModel.deviceId())
+    val callHeard = call.captions.lastOrNull { !it.mine && !it.transcribing }?.text?.trim().orEmpty()
+    LaunchedEffect(threadHeard) { viewModel.offerReplies(threadHeard) }
+    LaunchedEffect(callHeard) { viewModel.offerReplies(callHeard) }
+    fun chipsFor(heard: String) = when {
+        heard.isEmpty() -> emptyList()
+        modelReplies.containsKey(heard) -> modelReplies.getValue(heard)
+        else -> QuickReplies.fromRules(heard)
     }
     val qrPayload = viewModel.myQr()
     val qrImage by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, qrPayload) {
@@ -297,6 +308,10 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                         onFavorite = { viewModel.toggleFavorite(row.deviceId) },
                         onPlay = viewModel::playNote,
                         now = now,
+                        chips = chipsFor(threadHeard),
+                        onChip = { chip ->
+                            if (chip.fill) draft = chip.sendText else viewModel.sendDirect(row.deviceId, chip.sendText)
+                        },
                     )
                 }
             }
@@ -317,6 +332,8 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                     viewModel.declineCall()
                     route = CONTACTS
                 },
+                chips = chipsFor(callHeard),
+                onSendText = { text -> viewModel.sendDirect(call.peerId, text) },
             )
             MESSAGES -> V17Messages(
                 threads = threads,

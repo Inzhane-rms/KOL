@@ -121,7 +121,7 @@ The app does not declare the `INTERNET` permission. These are the only models th
 
 - **Whisper multilingual base**, file `ggml-base-q5_1.bin`. Speech to text on the phone. The language is forced to Tagalog.
 - **Rules engine** in `TriageEngine`. Keyword and phrase matching for emergencies. Not a neural model.
-- **Gemma 3 1B** int4, only if `gemma3-1b-it-int4.task` was placed on the phone. If it is missing, the rules engine is used.
+- **Gemma 3 1B** int4, only if `gemma3-1b-it-int4.task` was placed on the phone. If it is missing, the rules engine is used. Quick replies use the rules engine. Gemma may replace those chips only when it is already loaded, and only if it returns two or three short lines within 8 seconds. Otherwise the rules stay.
 
 ## DISCLOSURE
 
