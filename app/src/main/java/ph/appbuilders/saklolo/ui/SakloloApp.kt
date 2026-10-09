@@ -16,6 +16,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -46,6 +47,7 @@ import ph.appbuilders.saklolo.contact.CallPhase
 import ph.appbuilders.saklolo.relay.RelayPermissions
 import ph.appbuilders.saklolo.relay.RelayService
 import ph.appbuilders.saklolo.ui.theme.Ink
+import ph.appbuilders.saklolo.ui.theme.Poppins
 
 private const val CONTACTS = "contacts"
 private const val MESSAGES = "messages"
@@ -64,6 +66,7 @@ fun SakloloApp(viewModel: SakloloViewModel) {
     val call by viewModel.callUi.collectAsStateWithLifecycle()
     val voice by viewModel.voice.collectAsStateWithLifecycle()
     val notice by viewModel.notice.collectAsStateWithLifecycle()
+    val callFallback by viewModel.callFallback.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var route by remember { mutableStateOf(CONTACTS) }
@@ -365,6 +368,26 @@ fun SakloloApp(viewModel: SakloloViewModel) {
         locationWarning?.let {
             Text(it, color = Ink, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
         }
+    }
+
+    val fallbackText = callFallback
+    if (fallbackText != null) {
+        AlertDialog(
+            onDismissRequest = viewModel::dismissCallFallback,
+            text = {
+                Text(fallbackText, color = Ink, fontFamily = Poppins)
+            },
+            confirmButton = {
+                TextButton(onClick = { ensureMic { viewModel.confirmCallFallback() } }) {
+                    Text("Send voice note")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::dismissCallFallback) {
+                    Text("Cancel")
+                }
+            },
+        )
     }
 
     if (settingsOpen) {

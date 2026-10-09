@@ -20,6 +20,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import ph.appbuilders.saklolo.contact.CallOffer
 import ph.appbuilders.saklolo.contact.CaptionDisplay
 import ph.appbuilders.saklolo.contact.CallMachine
 import ph.appbuilders.saklolo.contact.CallPhase
@@ -29,7 +30,9 @@ import ph.appbuilders.saklolo.contact.ContactRow
 import ph.appbuilders.saklolo.contact.Conversation
 import ph.appbuilders.saklolo.contact.DirectMessage
 import ph.appbuilders.saklolo.contact.Identity
+import ph.appbuilders.saklolo.contact.LinkMessage
 import ph.appbuilders.saklolo.contact.Ptt
+import ph.appbuilders.saklolo.contact.SendGate
 import ph.appbuilders.saklolo.contact.VoiceControl
 import ph.appbuilders.saklolo.ask.AskEngine
 import ph.appbuilders.saklolo.ask.AskResult
@@ -165,6 +168,9 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _notice = MutableStateFlow<String?>(null)
     val notice: StateFlow<String?> = _notice.asStateFlow()
+    private val _callFallback = MutableStateFlow<String?>(null)
+    val callFallback: StateFlow<String?> = _callFallback.asStateFlow()
+    private var fallbackPeerId: String? = null
 
     init {
         viewModelScope.launch {
@@ -487,7 +493,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
             audioPath = audioPath,
         )
         store.addLocal(alert)
-        val delivered = relay.broadcast(alert)
+        val delivered = fanoutSos(alert)
         store.markDelivered(id, delivered)
         runtime.refreshAlerts()
         _sos.update {
@@ -546,7 +552,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
 
     fun deviceId(): String = runtime.settings.deviceId
 
-    fun myQr(): String = ContactQr.encode(deviceId(), displayName())
+    fun myQr(): String = ContactQr.encode(deviceId(), displayName(), runtime.settings.publicKeyText())
 
     fun shortCode(): String = Identity.shortCode(deviceId())
 
@@ -859,7 +865,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         val note = runtime.groupStore.find(noteId) ?: return
         val alert = GroupTriage.sendToMedics(note, System.currentTimeMillis())
         store.addLocal(alert)
-        val delivered = relay.broadcast(alert)
+        val delivered = fanoutSos(alert)
         store.markDelivered(alert.id, delivered)
         runtime.refreshAlerts()
         _notice.value = "Sent to medics"
@@ -873,7 +879,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
                 return
             }
             viewModelScope.launch(Dispatchers.IO) {
-                runtime.directStore.saveQr(contact.deviceId, contact.name, System.currentTimeMillis())
+                runtime.directStore.saveQr(contact.deviceId, contact.name, System.currentTimeMillis(), contact.publicKey)
                 runtime.refreshDirect()
                 _notice.value = "Added ${contact.name}"
             }
@@ -889,7 +895,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         if (fresh.isEmpty()) {
             _notice.value = "This phone already has that alert"
         } else {
-            fresh.forEach { relay.broadcast(it) }
+            fresh.forEach { fanoutSos(it) }
             _notice.value = "Added from QR: ${fresh.first().summary}"
         }
     }
@@ -964,8 +970,12 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     fun sendDirect(to: String, body: String, kind: String = "text", audioPath: String? = null) {
         val trimmed = body.trim()
         if (to.isBlank() || (trimmed.isEmpty() && kind == "text")) return
+        if (SendGate.blockReason(runtime.directStore.publicKey(to).isNotBlank(), sos = false) != null) {
+            _notice.value = SendGate.NEED_KEY
+            return
+        }
         viewModelScope.launch(Dispatchers.IO) {
-            val message = DirectMessage(
+            val draft = DirectMessage(
                 id = java.util.UUID.randomUUID().toString(),
                 fromDeviceId = deviceId(),
                 toDeviceId = to,
@@ -975,10 +985,33 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
                 kind = kind,
                 audioPath = audioPath,
             )
+            val message = sealOutgoing(draft)
+            if (message == null) {
+                _notice.value = SendGate.NEED_KEY
+                return@launch
+            }
             runtime.directStore.addLocal(message)
             runtime.relay.broadcastDirect(message)
             runtime.refreshDirect()
         }
+    }
+
+    private fun sealOutgoing(message: DirectMessage): DirectMessage? {
+        val peer = runtime.directStore.publicKey(message.toDeviceId)
+        val sealed = LinkMessage.sealText(runtime.settings.privateKeyBytes(), peer, message) ?: return null
+        val wav = message.audioPath
+        if (wav.isNullOrBlank()) return sealed
+        val file = File(wav)
+        if (!file.exists()) return sealed
+        val raw = LinkMessage.sealClip(runtime.settings.privateKeyBytes(), peer, sealed, file.readBytes()) ?: return null
+        val dest = File(runtime.clipsDir, "${message.id}.seal")
+        dest.writeBytes(raw)
+        return sealed.copy(clipPath = dest.absolutePath, clipBytes = raw.size, audioPath = wav)
+    }
+
+    private fun fanoutSos(alert: Alert): Int {
+        runtime.holdSosRadio()
+        return relay.broadcast(alert)
     }
 
     fun sendPing(peerId: String) {
@@ -987,14 +1020,36 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
 
     fun placeCall(peerId: String) {
         val row = runtime.directStore.rows().firstOrNull { it.deviceId == peerId } ?: return
-        if (!row.inRange) {
-            _notice.value = "Not in range right now"
+        val offer = CallOffer.fallback(row.inRange)
+        if (offer != null) {
+            fallbackPeerId = peerId
+            _callFallback.value = offer
+            return
+        }
+        if (SendGate.blockReason(runtime.directStore.publicKey(peerId).isNotBlank(), sos = false) != null) {
+            _notice.value = SendGate.NEED_KEY
             return
         }
         call = CallMachine.inviteOut(peerId, row.name)
         routeCallAudio(speaker = false)
         sendDirect(peerId, "Call", kind = Ptt.INVITE)
         publishCall(emergency = null)
+    }
+
+    fun dismissCallFallback() {
+        _callFallback.value = null
+        fallbackPeerId = null
+    }
+
+    fun confirmCallFallback() {
+        val peer = fallbackPeerId
+        dismissCallFallback()
+        if (peer.isNullOrBlank()) return
+        if (SendGate.blockReason(runtime.directStore.publicKey(peer).isNotBlank(), sos = false) != null) {
+            _notice.value = SendGate.NEED_KEY
+            return
+        }
+        startVoiceNote(peer)
     }
 
     fun acceptCall() {
@@ -1063,7 +1118,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
             language = _sos.value.language.name,
         )
         store.addLocal(alert)
-        store.markDelivered(id, relay.broadcast(alert))
+        store.markDelivered(id, fanoutSos(alert))
         runtime.refreshAlerts()
         _notice.value = "SOS sent"
     }
@@ -1131,21 +1186,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
                 val file = WavPcm.clipFile(runtime.clipsDir, id)
                 WavPcm.write(file, pcm)
                 val audioPath = if (file.exists() && file.length() > WavPcm.HEADER_BYTES) file.absolutePath else null
-                val message = DirectMessage(
-                    id = id,
-                    fromDeviceId = deviceId(),
-                    toDeviceId = peer,
-                    senderName = displayName(),
-                    body = body.take(800),
-                    createdAtMillis = System.currentTimeMillis(),
-                    kind = Ptt.CLIP,
-                    audioPath = audioPath,
-                )
-                withContext(Dispatchers.IO) {
-                    runtime.directStore.addLocal(message)
-                    runtime.relay.broadcastDirect(message)
-                    runtime.refreshDirect()
-                }
+                sendDirect(peer, body.take(800), kind = Ptt.CLIP, audioPath = audioPath)
                 if (Ptt.emergency(body)) publishCall(emergency = body)
             }
             publishCall()

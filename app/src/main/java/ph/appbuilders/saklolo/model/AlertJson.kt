@@ -54,6 +54,8 @@ data class WireDirect(
     val createdAtMillis: Long,
     val hops: Int = 0,
     val kind: String = "text",
+    val box: String = "",
+    val clipBytes: Int = 0,
 )
 
 @Serializable
@@ -63,6 +65,7 @@ data class AlertEnvelope(
     val clips: List<ClipLink> = emptyList(),
     val notes: List<WireNote> = emptyList(),
     val direct: List<WireDirect> = emptyList(),
+    val summary: List<String> = emptyList(),
 )
 
 data class RelayPacket(
@@ -70,6 +73,7 @@ data class RelayPacket(
     val clips: List<ClipLink> = emptyList(),
     val notes: List<WireNote> = emptyList(),
     val direct: List<WireDirect> = emptyList(),
+    val summary: List<String> = emptyList(),
 )
 
 @Serializable
@@ -84,8 +88,15 @@ object AlertJson {
         clips: List<ClipLink> = emptyList(),
         notes: List<WireNote> = emptyList(),
         direct: List<WireDirect> = emptyList(),
+        summary: List<String> = emptyList(),
     ): String = json.encodeToString(
-        AlertEnvelope(alerts = alerts.map { it.toWire() }, clips = clips, notes = notes, direct = direct),
+        AlertEnvelope(
+            alerts = alerts.map { it.toWire() },
+            clips = clips,
+            notes = notes,
+            direct = direct,
+            summary = summary,
+        ),
     )
 
     fun decodeEnvelope(payload: String): RelayPacket {
@@ -95,6 +106,7 @@ object AlertJson {
             clips = envelope.clips,
             notes = envelope.notes,
             direct = envelope.direct,
+            summary = envelope.summary,
         )
     }
 

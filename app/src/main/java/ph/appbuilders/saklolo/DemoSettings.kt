@@ -4,8 +4,10 @@ import android.content.Context
 import android.os.Build
 import java.util.UUID
 import ph.appbuilders.saklolo.contact.ContactQr
+import ph.appbuilders.saklolo.contact.DeviceKeys
 import ph.appbuilders.saklolo.contact.EndpointCard
 import ph.appbuilders.saklolo.contact.Identity
+import ph.appbuilders.saklolo.contact.SealedBox
 import ph.appbuilders.saklolo.relay.PeerFilter
 import ph.appbuilders.saklolo.relay.parseAllowlist
 import ph.appbuilders.saklolo.stt.SpeechLanguage
@@ -42,7 +44,19 @@ class DemoSettings(context: Context) {
             prefs.edit().putString(KEY_DISPLAY, trimmed.ifEmpty { fallback }).apply()
         }
 
-    fun endpointName(): String = EndpointCard.encode(deviceId, displayName)
+    fun endpointName(): String = EndpointCard.encode(deviceId, displayName, publicKeyText())
+
+    fun publicKeyText(): String = SealedBox.encodeKey(deviceKeys().publicKey)
+
+    fun privateKeyBytes(): ByteArray = deviceKeys().privateKey
+
+    private fun deviceKeys(): DeviceKeys {
+        val stored = SealedBox.decodeKey(prefs.getString(KEY_PRIVATE, null))
+        if (stored != null) return DeviceKeys(stored, SealedBox.publicFromPrivate(stored))
+        val created = SealedBox.generate()
+        prefs.edit().putString(KEY_PRIVATE, SealedBox.encodeKey(created.privateKey)).apply()
+        return created
+    }
 
     var lastChatReadMillis: Long
         get() = prefs.getLong(KEY_CHAT_READ, 0L)
@@ -80,5 +94,6 @@ class DemoSettings(context: Context) {
         private const val KEY_RESTRICT = "restrict"
         private const val KEY_ALLOW = "allow"
         private const val KEY_LANG = "lang"
+        private const val KEY_PRIVATE = "x25519_private"
     }
 }

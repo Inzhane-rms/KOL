@@ -28,3 +28,17 @@ object RelayPolicy {
         return alert
     }
 }
+
+/** SOS bytes go out before live 1:1, and live goes out before a summary exchange. */
+object RelayLane {
+    const val SOS = 0
+    const val LIVE = 1
+    const val HISTORY = 2
+
+    fun next(hasSos: Boolean, hasLive: Boolean, hasHistory: Boolean): Int? = when {
+        hasSos -> SOS
+        hasLive -> LIVE
+        hasHistory -> HISTORY
+        else -> null
+    }
+}

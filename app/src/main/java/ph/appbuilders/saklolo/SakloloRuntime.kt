@@ -12,7 +12,9 @@ import ph.appbuilders.saklolo.contact.DirectStore
 import ph.appbuilders.saklolo.data.MIGRATION_1_2
 import ph.appbuilders.saklolo.data.MIGRATION_2_3
 import ph.appbuilders.saklolo.data.MIGRATION_3_4
+import ph.appbuilders.saklolo.contact.LinkMessage
 import ph.appbuilders.saklolo.data.MIGRATION_4_5
+import ph.appbuilders.saklolo.data.MIGRATION_5_6
 import ph.appbuilders.saklolo.data.RoomAlertPersistence
 import ph.appbuilders.saklolo.data.RoomDirectPersistence
 import ph.appbuilders.saklolo.data.RoomGroupPersistence
@@ -72,7 +74,7 @@ class SakloloRuntime private constructor(val app: Application) {
         app.getExternalFilesDir(null)?.mkdirs()
         val database = Room.databaseBuilder(app, SakloloDatabase::class.java, "saklolo.db")
             .allowMainThreadQueries()
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
             .fallbackToDestructiveMigration()
             .build()
         store = AlertStore(RoomAlertPersistence(database))
@@ -98,12 +100,39 @@ class SakloloRuntime private constructor(val app: Application) {
             },
         )
         relay.setFilter(settings.peerFilter())
+        relay.selfName = { settings.displayName }
+        relay.selfKey = { settings.publicKeyText() }
+        relay.openClip = { message, bytes ->
+            LinkMessage.openClip(settings.privateKeyBytes(), directStore.publicKey(message.fromDeviceId), message, bytes)
+        }
+        directStore.openSealed = { message ->
+            LinkMessage.openText(settings.privateKeyBytes(), directStore.publicKey(message.fromDeviceId), message)
+        }
+        directStore.onAddressed = { message ->
+            val ack = LinkMessage.ack(
+                original = message,
+                myId = settings.deviceId,
+                myName = settings.displayName,
+                privateKey = settings.privateKeyBytes(),
+                peerPublic = directStore.publicKey(message.fromDeviceId),
+                now = System.currentTimeMillis(),
+            )
+            if (ack != null) {
+                directStore.addLocal(ack)
+                relay.broadcastDirect(ack)
+                refreshDirect()
+            }
+        }
         GemmaSummarizer.preload(app)
     }
 
     fun ensureRelay() {
         relay.setFilter(settings.peerFilter())
         relay.start(settings.endpointName())
+    }
+
+    fun holdSosRadio() {
+        relay.holdSos(settings.endpointName())
     }
 
     fun noteRelayStartFailed(message: String) {
