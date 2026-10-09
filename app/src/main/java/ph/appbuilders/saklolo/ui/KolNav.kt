@@ -20,7 +20,11 @@ object KolNav {
         else -> current
     }
 
-    fun afterCall(peer: String): String = if (peer.isNotBlank()) MainNav.THREAD else MainNav.HOME
+    /** A call returns to the route it started from. A blank or unknown route lands on Home. */
+    fun afterCall(startedAt: String): String = when (startedAt) {
+        MainNav.HOME, MainNav.CONTACTS, MainNav.MESSAGES, MainNav.ADD, MainNav.THREAD -> startedAt
+        else -> MainNav.HOME
+    }
 
     /**
      * Bar is 304dp, padding 8+8, three 8dp gaps, three 48dp idle slots.
@@ -62,12 +66,12 @@ object KolNav {
     fun friendsLine(inRange: Int): String =
         if (inRange == 1) "Offline · 1 friend in range" else "Offline · $inRange friends in range"
 
-    /** In-range means this phone handed the message to that phone. There is no receipt. */
-    fun bubbleStatus(inRange: Boolean, time: String): String =
-        if (inRange) "$SENT · $time" else WAITING
+    /** Sent follows the stored handoff time. Live range never flips a sent message back to Waiting. */
+    fun bubbleStatus(sentAtMillis: Long, time: String): String =
+        if (sentAtMillis > 0L) "$SENT · $time" else WAITING
 
-    fun homeStatus(inRange: Boolean, name: String): String =
-        if (inRange) "$SENT · $name" else "$WAITING · $name"
+    fun homeStatus(sentAtMillis: Long, name: String): String =
+        if (sentAtMillis > 0L) "$SENT · $name" else "$WAITING · $name"
 
     fun homeBackLabel(setupMissing: Int, waitingPeers: Int, lastHeardMillis: Long, now: Long): String = when {
         setupMissing > 0 -> "Setup needed"
@@ -77,11 +81,11 @@ object KolNav {
         else -> "Nothing queued"
     }
 
+    @Suppress("UNUSED_PARAMETER")
     fun waitingPeers(messages: List<DirectMessage>, contacts: List<ContactRow>, myId: String): Int {
-        val away = contacts.filter { !it.inRange }.map { it.deviceId }.toSet()
         return messages.mapNotNull { message ->
-            val peer = if (message.localOrigin || message.fromDeviceId == myId) message.toDeviceId else null
-            peer?.takeIf { it in away }
+            val outgoing = message.localOrigin || message.fromDeviceId == myId
+            if (!outgoing || message.sentAtMillis > 0L) null else message.toDeviceId.takeIf { it.isNotBlank() }
         }.distinct().size
     }
 
@@ -109,9 +113,9 @@ object KolNav {
             .maxByOrNull { it.createdAtMillis }
             ?.let { message ->
                 val name = peerName(message.toDeviceId, contacts, "")
-                val handedOff = contacts.firstOrNull { it.deviceId == message.toDeviceId }?.inRange == true
+                val handedOff = message.sentAtMillis > 0L
                 rows += KolActivity(
-                    title = homeStatus(handedOff, name),
+                    title = homeStatus(message.sentAtMillis, name),
                     detail = CaptionDisplay.text(message.body),
                     tone = if (handedOff) "sent" else "waiting",
                     at = message.createdAtMillis,

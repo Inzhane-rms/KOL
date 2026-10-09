@@ -159,6 +159,7 @@ data class DirectEntity(
     val audioPath: String?,
     val localOrigin: Boolean,
     val rawBody: String? = null,
+    val sentAtMillis: Long = 0,
 )
 
 @Dao
@@ -199,7 +200,7 @@ interface DirectDao {
         ContactEntity::class,
         DirectEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = false,
 )
 abstract class SakloloDatabase : RoomDatabase() {
@@ -217,6 +218,12 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
 val MIGRATION_5_6 = object : Migration(5, 6) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE direct_messages ADD COLUMN rawBody TEXT")
+    }
+}
+
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE direct_messages ADD COLUMN sentAtMillis INTEGER NOT NULL DEFAULT 0")
     }
 }
 
@@ -379,6 +386,7 @@ class RoomDirectPersistence(private val database: SakloloDatabase) : DirectPersi
                     audioPath = it.audioPath,
                     localOrigin = it.localOrigin,
                     rawBody = it.rawBody,
+                    sentAtMillis = it.sentAtMillis,
                 )
             },
         )
@@ -402,6 +410,7 @@ class RoomDirectPersistence(private val database: SakloloDatabase) : DirectPersi
                     audioPath = it.audioPath,
                     localOrigin = it.localOrigin,
                     rawBody = it.rawBody,
+                    sentAtMillis = it.sentAtMillis,
                 )
             },
         )

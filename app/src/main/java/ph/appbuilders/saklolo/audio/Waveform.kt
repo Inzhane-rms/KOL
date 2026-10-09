@@ -16,6 +16,10 @@ object Waveform {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<Float>>?): Boolean = size > 32
     }
 
+    fun clear() {
+        synchronized(cache) { cache.clear() }
+    }
+
     fun decoder(file: File): String = if (WavPcm.isWav(file)) WAV else AAC
 
     fun barsFromPcm(samples: ShortArray, bars: Int): List<Float> {

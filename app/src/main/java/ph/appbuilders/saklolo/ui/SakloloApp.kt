@@ -239,8 +239,9 @@ fun SakloloApp(viewModel: SakloloViewModel) {
             }
         } else if (route == CALL) {
             val peer = call.peerId.ifBlank { callPeer }
-            if (peer.isNotBlank()) peerId = peer
-            route = KolNav.afterCall(peer)
+            val next = KolNav.afterCall(callFrom)
+            if (next == THREAD && peer.isNotBlank()) peerId = peer
+            route = next
         }
     }
     val setupMissing = ReadyToConnect.requiredMissing(facts)
@@ -253,8 +254,9 @@ fun SakloloApp(viewModel: SakloloViewModel) {
     fun leaveCall(end: Boolean) {
         val peer = call.peerId.ifBlank { callPeer }
         if (end) viewModel.endCall() else viewModel.declineCall()
-        if (peer.isNotBlank()) peerId = peer
-        route = KolNav.afterCall(peer)
+        val next = KolNav.afterCall(callFrom)
+        if (next == THREAD && peer.isNotBlank()) peerId = peer
+        route = next
     }
     BackHandler(enabled = legalPage != null || !termsOk || showSetup || askName || quickCall || route != HOME) {
         when {

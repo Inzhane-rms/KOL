@@ -3,13 +3,23 @@ package ph.appbuilders.saklolo
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import ph.appbuilders.saklolo.contact.ClipCommit
 import ph.appbuilders.saklolo.contact.DirectMessage
 import ph.appbuilders.saklolo.contact.DirectStore
 import ph.appbuilders.saklolo.contact.MemoryDirectPersistence
 import ph.appbuilders.saklolo.contact.ReplyCache
 import ph.appbuilders.saklolo.contact.ReplyChip
+import ph.appbuilders.saklolo.contact.WipeSessions
+import ph.appbuilders.saklolo.group.GroupNote
+import ph.appbuilders.saklolo.group.GroupPersistence
+import ph.appbuilders.saklolo.group.GroupSnapshot
+import ph.appbuilders.saklolo.group.GroupStore
+import ph.appbuilders.saklolo.group.VoiceDraft
+import ph.appbuilders.saklolo.relay.OutboundGate
+import ph.appbuilders.saklolo.stt.ModelInstaller
 import ph.appbuilders.saklolo.ui.messageClock
 
 /** Delete all data clears the phone and leaves the speech model file. */
@@ -100,6 +110,10 @@ class DataWipeTest {
         assertTrue(licenses.contains("Poppins"))
         assertTrue(strings.contains("I agree"))
         assertTrue(strings.contains("Delete all data"))
+        assertTrue(strings.contains(">Delete</string>"))
+        assertTrue(strings.contains("Terms of use"))
+        assertTrue(strings.contains("Privacy policy"))
+        assertTrue(strings.contains("By continuing you agree to the Terms of use and Privacy policy"))
         assertTrue(strings.contains("This can\\'t be undone."))
         assertTrue(strings.contains("Messages you already sent stay on the other person\\'s phone."))
         assertTrue(strings.contains(">Cancel<"))
@@ -110,6 +124,83 @@ class DataWipeTest {
         val clock = messageClock(1_700_000_000_000L)
         assertTrue(clock.contains(":"))
         assertFalse(clock.contains("delivered", ignoreCase = true))
+    }
+
+    @Test
+    fun aStaleClipNeverSavesOrSendsAfterTheWipeBump() {
+        val store = DirectStore(MemoryDirectPersistence())
+        store.myId = "phone-ana-1111"
+        val started = WipeSessions(hold = 2, epoch = 4, voice = 3, record = 1)
+        val live = started.bump()
+        assertFalse(ClipCommit.allow(started.hold, live.hold))
+        assertFalse(ClipCommit.allow(started.voice, live.voice))
+        assertTrue(VoiceDraft.decide(started.epoch, live.epoch, "nandito ako") is VoiceDraft.Finish.Discarded)
+        val epoch = store.epoch()
+        val gate = OutboundGate()
+        val token = gate.token()
+        gate.cancel()
+        assertFalse(gate.live(token))
+        assertTrue(gate.live(gate.token()))
+        val stale = DirectMessage(
+            id = "stale",
+            fromDeviceId = "phone-ana-1111",
+            toDeviceId = "phone-ben-2222",
+            senderName = "Ana",
+            body = "Nandito ako",
+            createdAtMillis = 5L,
+            kind = "call_clip",
+        )
+        if (ClipCommit.allow(started.hold, live.hold) && gate.live(token)) {
+            store.addIfCurrent(stale, epoch)
+        }
+        assertTrue(store.visible(store.myId).isEmpty())
+        store.bumpEpoch()
+        assertNull(store.addIfCurrent(stale, epoch))
+        val fresh = store.addIfCurrent(stale.copy(id = "fresh"), store.epoch())
+        assertEquals("fresh", fresh!!.id)
+        assertEquals(0L, store.find("fresh")!!.sentAtMillis)
+        assertTrue(store.markSent(listOf("fresh"), 80L))
+        assertEquals(80L, store.find("fresh")!!.sentAtMillis)
+        assertFalse(store.markSent(listOf("fresh"), 90L))
+        assertFalse(store.markSent(listOf("fresh"), 0L))
+        assertEquals(80L, store.find("fresh")!!.sentAtMillis)
+    }
+
+    @Test
+    fun roomWritesStayOnTheCallerSoMainThreadQueriesStay() {
+        val saver = object : GroupPersistence {
+            var thread: Thread? = null
+            override fun load(): GroupSnapshot = GroupSnapshot()
+            override fun save(snapshot: GroupSnapshot) {
+                thread = Thread.currentThread()
+            }
+        }
+        val store = GroupStore(saver)
+        store.addLocal(GroupNote(id = "n1", groupId = "g1", sender = "Ana", body = "Ping", createdAtMillis = 1L))
+        assertEquals(Thread.currentThread(), saver.thread)
+        val runtime = listOf(
+            File("src/main/java/ph/appbuilders/saklolo/SakloloRuntime.kt"),
+            File("app/src/main/java/ph/appbuilders/saklolo/SakloloRuntime.kt"),
+        ).first { it.exists() }.readText()
+        assertTrue(runtime.contains("allowMainThreadQueries()"))
+    }
+
+    @Test
+    fun smallTagalogModelNeedsARealDigestAndIsNotTheDefault() {
+        assertEquals("", ModelInstaller.SMALL_TL_SHA256)
+        assertFalse(ModelInstaller.acceptsSmall(60L * 1024 * 1024, "ab".repeat(32)))
+        val digest = "cd".repeat(32)
+        assertEquals(64, digest.length)
+        assertTrue(ModelInstaller.acceptsSmall(60L * 1024 * 1024, digest, expected = digest))
+        assertTrue(ModelInstaller.acceptsSmall(60L * 1024 * 1024, digest.uppercase(), expected = digest))
+        assertFalse(ModelInstaller.acceptsSmall(49L * 1024 * 1024, digest, expected = digest))
+        assertFalse(ModelInstaller.acceptsSmall(60L * 1024 * 1024, "ab".repeat(32), expected = digest))
+        assertFalse(ModelInstaller.acceptsSmall(60L * 1024 * 1024, digest, expected = ""))
+        val source = listOf(
+            File("src/main/java/ph/appbuilders/saklolo/stt/ModelInstaller.kt"),
+            File("app/src/main/java/ph/appbuilders/saklolo/stt/ModelInstaller.kt"),
+        ).first { it.exists() }.readText()
+        assertTrue(source.contains("fun resolve(context: Context): File = installedFile(context)"))
     }
 
     private fun asset(name: String): String {

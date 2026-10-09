@@ -143,9 +143,9 @@ private fun LinkText(label: String, onClick: () -> Unit) {
         fontSize = 15.sp,
         textDecoration = TextDecoration.Underline,
         modifier = Modifier
-            .height(48.dp)
+            .height(56.dp)
             .clickable(onClick = onClick)
-            .padding(vertical = 12.dp),
+            .padding(vertical = 16.dp),
     )
 }
 
@@ -210,7 +210,7 @@ fun LegalHub(onOpen: (String) -> Unit, onSettings: () -> Unit, onClose: () -> Un
                 stringResource(R.string.legal_close),
                 color = VioletDeep,
                 fontFamily = Poppins,
-                fontWeight = FontWeight.Bold,
+                fontWeight = FontWeight.SemiBold,
                 fontSize = 16.sp,
             )
         }
@@ -289,8 +289,8 @@ fun LegalPage(name: String, onClose: () -> Unit) {
                 stringResource(R.string.legal_close),
                 color = CardWhite,
                 fontFamily = Poppins,
-                fontWeight = FontWeight.Bold,
-                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 16.sp,
             )
         }
     }

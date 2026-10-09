@@ -65,15 +65,16 @@ class KolUiTest {
         assertEquals("waiting", activity.first { it.peerId == "phone-ben1" && it.at == 3_000L }.tone)
         assertTrue(activity.none { it.title.contains("delivered", ignoreCase = true) })
         assertTrue(activity.none { it.title.contains("missed", ignoreCase = true) })
-        val delivered = KolNav.recentActivity(messages, listOf(ben.copy(inRange = true)), me)
-        assertEquals("Sent · Ben", delivered.first { it.at == 3_000L }.title)
-        assertEquals("Sent · 9:13 AM", KolNav.bubbleStatus(inRange = true, time = "9:13 AM"))
-        assertEquals("Waiting", KolNav.bubbleStatus(inRange = false, time = "9:13 AM"))
-        assertFalse(KolNav.homeStatus(true, "Ben").contains("delivered", ignoreCase = true))
+        val nearby = KolNav.recentActivity(messages, listOf(ben.copy(inRange = true)), me)
+        assertEquals("Waiting · Ben", nearby.first { it.at == 3_000L }.title)
+        assertEquals("waiting", nearby.first { it.at == 3_000L }.tone)
+        assertEquals("Sent · 9:13 AM", KolNav.bubbleStatus(sentAtMillis = 9_000L, time = "9:13 AM"))
+        assertEquals("Waiting", KolNav.bubbleStatus(sentAtMillis = 0L, time = "9:13 AM"))
+        assertFalse(KolNav.homeStatus(9_000L, "Ben").contains("delivered", ignoreCase = true))
         assertEquals("Offline · 1 friend in range", KolNav.friendsLine(1))
         assertEquals("Offline · 2 friends in range", KolNav.friendsLine(2))
         assertEquals(1, KolNav.waitingPeers(messages, listOf(ben), me))
-        assertEquals(0, KolNav.waitingPeers(messages, listOf(ben.copy(inRange = true)), me))
+        assertEquals(1, KolNav.waitingPeers(messages, listOf(ben.copy(inRange = true)), me))
         assertFalse(HoldMute.allowStart(muted = true))
         assertTrue(HoldMute.allowStart(muted = false))
         assertTrue(HoldMute.dropInFlight(muted = true))
@@ -88,9 +89,14 @@ class KolUiTest {
         assertEquals(MainNav.THREAD, KolNav.backTarget(MainNav.THREAD, MainNav.HOME))
         assertEquals(MainNav.HOME, KolNav.backTarget(MainNav.HOME, MainNav.CONTACTS))
         assertEquals(MainNav.CONTACTS, KolNav.backTarget(MainNav.CALL, MainNav.CONTACTS))
-        assertEquals(MainNav.THREAD, KolNav.afterCall("phone-ben"))
+        assertEquals(MainNav.THREAD, KolNav.afterCall(MainNav.THREAD))
+        assertEquals(MainNav.HOME, KolNav.afterCall(MainNav.HOME))
+        assertEquals(MainNav.CONTACTS, KolNav.afterCall(MainNav.CONTACTS))
+        assertEquals(MainNav.MESSAGES, KolNav.afterCall(MainNav.MESSAGES))
+        assertEquals(MainNav.ADD, KolNav.afterCall(MainNav.ADD))
         assertEquals(MainNav.HOME, KolNav.afterCall(" "))
         assertEquals(MainNav.HOME, KolNav.afterCall(""))
+        assertEquals(MainNav.HOME, KolNav.afterCall("phone-ben"))
         assertEquals(1L, CallSession.nextId(wasIdle = true, nowIdle = false, currentId = 0L))
         assertEquals(1L, CallSession.nextId(wasIdle = false, nowIdle = false, currentId = 1L))
         assertEquals(2L, CallSession.nextId(wasIdle = true, nowIdle = false, currentId = 1L))
@@ -101,6 +107,27 @@ class KolUiTest {
         assertEquals("0:00", CallClock.label(0L))
         assertEquals("0:00", CallClock.label(-20L))
         assertEquals("1:05", CallClock.label(65_000L))
+    }
+
+    @Test
+    fun sentLabelUsesTheStoredHandoffAndDoesNotRevert() {
+        val me = "phone-ana1"
+        val away = contact("phone-ben1", "Ben", saved = true, inRange = false, added = 5_000)
+        val near = away.copy(inRange = true)
+        val waiting = message("t1", me, "phone-ben1", "Sige", "text", 3_000, local = true, sentAt = 0L)
+        val sent = waiting.copy(id = "t2", sentAtMillis = 9_000L)
+        assertEquals("Waiting", KolNav.bubbleStatus(waiting.sentAtMillis, "9:13 AM"))
+        assertEquals("Sent · 9:13 AM", KolNav.bubbleStatus(sent.sentAtMillis, "9:13 AM"))
+        assertEquals("Waiting · Ben", KolNav.homeStatus(waiting.sentAtMillis, "Ben"))
+        assertEquals("Sent · Ben", KolNav.homeStatus(sent.sentAtMillis, "Ben"))
+        val stillSent = KolNav.recentActivity(listOf(sent), listOf(away), me).first { it.at == 3_000L }
+        assertEquals("Sent · Ben", stillSent.title)
+        assertEquals("sent", stillSent.tone)
+        val stillWaiting = KolNav.recentActivity(listOf(waiting), listOf(near), me).first { it.at == 3_000L }
+        assertEquals("Waiting · Ben", stillWaiting.title)
+        assertEquals("waiting", stillWaiting.tone)
+        assertEquals(0, KolNav.waitingPeers(listOf(sent), listOf(away), me))
+        assertEquals(1, KolNav.waitingPeers(listOf(waiting), listOf(near), me))
     }
 
     @Test
@@ -135,15 +162,24 @@ class KolUiTest {
         addedAtMillis = added,
     )
 
-    private fun message(id: String, from: String, to: String, body: String, kind: String, at: Long, local: Boolean = false) =
-        DirectMessage(
-            id = id,
-            fromDeviceId = from,
-            toDeviceId = to,
-            senderName = from,
-            body = body,
-            createdAtMillis = at,
-            kind = kind,
-            localOrigin = local,
-        )
+    private fun message(
+        id: String,
+        from: String,
+        to: String,
+        body: String,
+        kind: String,
+        at: Long,
+        local: Boolean = false,
+        sentAt: Long = 0L,
+    ) = DirectMessage(
+        id = id,
+        fromDeviceId = from,
+        toDeviceId = to,
+        senderName = from,
+        body = body,
+        createdAtMillis = at,
+        kind = kind,
+        localOrigin = local,
+        sentAtMillis = sentAt,
+    )
 }

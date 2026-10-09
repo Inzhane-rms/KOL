@@ -20,6 +20,9 @@ data class SpeechHearing(
     companion object {
         fun interpret(raw: String, names: List<String> = emptyList()): SpeechHearing {
             val cleaned = raw.trim()
+            if (cleaned == TranscriptLimit.UNAVAILABLE) {
+                return SpeechHearing(cleaned, cleaned, Urgency.SAFE)
+            }
             val shown = SpeechPolish.apply(cleaned, names).ifBlank { cleaned }
             val fromRaw = TriageEngine.triage(cleaned)
             val fromShown = if (shown.equals(cleaned, ignoreCase = true)) fromRaw else TriageEngine.triage(shown)
@@ -31,14 +34,39 @@ data class SpeechHearing(
     }
 }
 
-/** Beam stays on until a clip runs longer than its own length times [SLOW_FACTOR]. */
+/** Greedy is the default. Beam is allowed only after a clip finished faster than its own length. */
 object DecodeBudget {
     const val SLOW_FACTOR = 1.5
+    const val MIN_DEADLINE_MS = 3_000L
 
-    fun allowBeam(configuredBeam: Int, markedSlow: Boolean): Boolean = configuredBeam > 1 && !markedSlow
+    fun deadlineMs(clipSeconds: Double): Long {
+        val scaled = (clipSeconds * SLOW_FACTOR * 1000.0).toLong()
+        return maxOf(MIN_DEADLINE_MS, scaled)
+    }
+
+    fun allowBeam(configuredBeam: Int, earnedFast: Boolean): Boolean = configuredBeam > 1 && earnedFast
+
+    fun markFast(elapsedSeconds: Double, clipSeconds: Double): Boolean =
+        clipSeconds > 0.0 && elapsedSeconds < clipSeconds
 
     fun markSlow(elapsedSeconds: Double, clipSeconds: Double): Boolean =
         clipSeconds > 0.0 && elapsedSeconds > clipSeconds * SLOW_FACTOR
+}
+
+/** Greedy until a fast clip earns beam. A slow or aborted beam drops it again. */
+object BeamSelect {
+    fun nextBeam(configuredBeam: Int, earnedFast: Boolean): Int =
+        if (DecodeBudget.allowBeam(configuredBeam, earnedFast)) configuredBeam else 1
+
+    fun remember(wasEarned: Boolean, beam: Int, elapsedSeconds: Double, clipSeconds: Double, aborted: Boolean): Boolean {
+        if (beam == 1 && !aborted && DecodeBudget.markFast(elapsedSeconds, clipSeconds)) return true
+        if (beam > 1 && (aborted || DecodeBudget.markSlow(elapsedSeconds, clipSeconds))) return false
+        return wasEarned
+    }
+}
+
+object TranscriptLimit {
+    const val UNAVAILABLE = "transcript unavailable"
 }
 
 /** Gemma may clean wording only when the rules did not flag an emergency. */

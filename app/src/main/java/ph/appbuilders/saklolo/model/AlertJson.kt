@@ -54,6 +54,7 @@ data class WireDirect(
     val createdAtMillis: Long,
     val hops: Int = 0,
     val kind: String = "text",
+    val rawBody: String? = null,
 )
 
 @Serializable

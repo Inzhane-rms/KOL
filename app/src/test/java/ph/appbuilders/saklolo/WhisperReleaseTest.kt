@@ -35,6 +35,8 @@ class WhisperReleaseTest {
                 freed.countDown()
             }
 
+            override fun requestAbort() = Unit
+
             override fun transcribe(
                 contextPtr: Long,
                 audio: FloatArray,
@@ -42,6 +44,7 @@ class WhisperReleaseTest {
                 language: String,
                 prompt: String,
                 beam: Int,
+                budgetMs: Long,
             ): String {
                 order += "transcribe"
                 started.countDown()

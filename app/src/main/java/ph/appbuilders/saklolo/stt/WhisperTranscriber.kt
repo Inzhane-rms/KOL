@@ -1,5 +1,6 @@
 package ph.appbuilders.saklolo.stt
 
+import android.content.SharedPreferences
 import android.util.Log
 import java.io.File
 import ph.appbuilders.saklolo.audio.SpeechPrep
@@ -12,7 +13,29 @@ import kotlinx.coroutines.withContext
 internal interface WhisperEngine {
     fun initContext(modelPath: String): Long
     fun freeContext(contextPtr: Long)
-    fun transcribe(contextPtr: Long, audio: FloatArray, threads: Int, language: String, prompt: String, beam: Int): String?
+    fun requestAbort()
+    fun transcribe(
+        contextPtr: Long,
+        audio: FloatArray,
+        threads: Int,
+        language: String,
+        prompt: String,
+        beam: Int,
+        budgetMs: Long,
+    ): String?
+}
+
+internal object DecodeMark {
+    const val ABORT = "\u001e"
+
+    fun aborted(raw: String?): Boolean = raw != null && raw.startsWith(ABORT)
+
+    fun text(raw: String?): String {
+        if (raw == null) return ""
+        if (!raw.startsWith(ABORT)) return raw.trim()
+        val body = raw.removePrefix(ABORT).trim()
+        return body.ifEmpty { TranscriptLimit.UNAVAILABLE }
+    }
 }
 
 private object JniWhisperEngine : WhisperEngine {
@@ -22,6 +45,10 @@ private object JniWhisperEngine : WhisperEngine {
         WhisperNative.freeContext(contextPtr)
     }
 
+    override fun requestAbort() {
+        WhisperNative.requestAbort()
+    }
+
     override fun transcribe(
         contextPtr: Long,
         audio: FloatArray,
@@ -29,24 +56,62 @@ private object JniWhisperEngine : WhisperEngine {
         language: String,
         prompt: String,
         beam: Int,
-    ): String? = WhisperNative.transcribe(contextPtr, audio, threads, language, prompt, beam)
+        budgetMs: Long,
+    ): String? = WhisperNative.transcribe(contextPtr, audio, threads, language, prompt, beam, budgetMs)
 }
 
 /**
  * Runs whisper.cpp on one thread. The C context must not be used concurrently,
  * and [release] frees it on that same thread after any in-flight transcription.
  */
+internal interface BeamMemory {
+    fun load(): Boolean
+    fun save(earned: Boolean)
+
+    companion object {
+        val NONE: BeamMemory = object : BeamMemory {
+            override fun load(): Boolean = false
+            override fun save(earned: Boolean) = Unit
+        }
+    }
+}
+
+internal class PrefsBeamMemory(private val prefs: SharedPreferences) : BeamMemory {
+    override fun load(): Boolean = prefs.getBoolean(KEY, false)
+
+    override fun save(earned: Boolean) {
+        prefs.edit().putBoolean(KEY, earned).commit()
+    }
+
+    companion object {
+        const val KEY = "beam_earned"
+    }
+}
+
 class WhisperTranscriber internal constructor(
     private val modelFile: File,
     private val engine: WhisperEngine,
     private val executor: ExecutorService,
+    private val memory: BeamMemory = BeamMemory.NONE,
 ) {
-    constructor(modelFile: File) : this(modelFile, JniWhisperEngine, whisperWorker())
+    constructor(modelFile: File) : this(modelFile, JniWhisperEngine, whisperWorker(), BeamMemory.NONE)
+
+    constructor(modelFile: File, prefs: SharedPreferences) : this(
+        modelFile,
+        JniWhisperEngine,
+        whisperWorker(),
+        PrefsBeamMemory(prefs),
+    )
 
     private val dispatcher = executor.asCoroutineDispatcher()
     private val released = AtomicBoolean(false)
     private var contextPtr: Long = 0
-    private var beamSlow = false
+    private var beamLoaded = false
+    private var beamEarned = false
+
+    fun abort() {
+        engine.requestAbort()
+    }
 
     @Suppress("UNUSED_PARAMETER")
     suspend fun transcribe(pcm16k: FloatArray, languageCode: String, names: List<String> = emptyList()): String = withContext(dispatcher) {
@@ -59,20 +124,37 @@ class WhisperTranscriber internal constructor(
                 error("Could not load the on-device speech model")
             }
         }
+        if (!beamLoaded) {
+            beamEarned = memory.load()
+            beamLoaded = true
+        }
         val clipSeconds = audio.size / SpeechPrep.SAMPLE_RATE.toDouble()
-        val beam = if (DecodeBudget.allowBeam(WhisperPrompt.BEAM, beamSlow)) WhisperPrompt.BEAM else 1
+        val budgetMs = DecodeBudget.deadlineMs(clipSeconds)
+        val beam = BeamSelect.nextBeam(WhisperPrompt.BEAM, beamEarned)
         val started = System.nanoTime()
-        val text = engine.transcribe(
+        val raw = engine.transcribe(
             contextPtr,
             audio,
             WhisperPrompt.THREADS,
             WhisperPrompt.LANGUAGE,
             WhisperPrompt.text(names),
             beam,
+            budgetMs,
         )
         val elapsed = (System.nanoTime() - started) / 1_000_000_000.0
-        if (beam > 1 && DecodeBudget.markSlow(elapsed, clipSeconds)) beamSlow = true
-        text?.trim().orEmpty()
+        val aborted = DecodeMark.aborted(raw)
+        val nextEarned = BeamSelect.remember(beamEarned, beam, elapsed, clipSeconds, aborted)
+        if (nextEarned != beamEarned) {
+            beamEarned = nextEarned
+            memory.save(nextEarned)
+        }
+        runCatching {
+            Log.i(
+                "BLINK",
+                "decode beam=$beam elapsed_ms=${(elapsed * 1000).toLong()} clip_ms=${(clipSeconds * 1000).toLong()} budget_ms=$budgetMs earned=$beamEarned aborted=$aborted",
+            )
+        }
+        DecodeMark.text(raw)
     }
 
     fun release() {

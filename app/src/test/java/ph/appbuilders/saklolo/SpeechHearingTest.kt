@@ -6,6 +6,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import ph.appbuilders.saklolo.contact.Ptt
+import ph.appbuilders.saklolo.stt.BeamSelect
 import ph.appbuilders.saklolo.stt.CaptionCleanup
 import ph.appbuilders.saklolo.stt.DecodeBudget
 import ph.appbuilders.saklolo.stt.SpeechHearing
@@ -89,11 +90,27 @@ class SpeechHearingTest {
     @Test
     fun beamFallsBackWhenAClipRunsLongerThanItself() {
         assertEquals(5, WhisperPrompt.BEAM)
-        assertTrue(DecodeBudget.allowBeam(WhisperPrompt.BEAM, markedSlow = false))
-        assertFalse(DecodeBudget.allowBeam(WhisperPrompt.BEAM, markedSlow = true))
-        assertFalse(DecodeBudget.allowBeam(1, markedSlow = false))
+        assertFalse(WhisperPrompt.USE_BEAM)
+        assertFalse(DecodeBudget.allowBeam(WhisperPrompt.BEAM, earnedFast = false))
+        assertTrue(DecodeBudget.allowBeam(WhisperPrompt.BEAM, earnedFast = true))
+        assertFalse(DecodeBudget.allowBeam(1, earnedFast = true))
+        assertTrue(DecodeBudget.markFast(elapsedSeconds = 0.4, clipSeconds = 1.0))
+        assertFalse(DecodeBudget.markFast(elapsedSeconds = 1.2, clipSeconds = 1.0))
+        assertEquals(3_000L, DecodeBudget.deadlineMs(1.0))
+        assertEquals(15_000L, DecodeBudget.deadlineMs(10.0))
         assertFalse(DecodeBudget.markSlow(elapsedSeconds = 10.0, clipSeconds = 10.0))
         assertTrue(DecodeBudget.markSlow(elapsedSeconds = 16.0, clipSeconds = 10.0))
+        assertEquals(1, BeamSelect.nextBeam(WhisperPrompt.BEAM, earnedFast = false))
+        assertEquals(5, BeamSelect.nextBeam(WhisperPrompt.BEAM, earnedFast = true))
+        assertEquals(1, BeamSelect.nextBeam(1, earnedFast = true))
+        assertTrue(BeamSelect.remember(wasEarned = false, beam = 1, elapsedSeconds = 0.4, clipSeconds = 1.0, aborted = false))
+        assertFalse(BeamSelect.remember(wasEarned = false, beam = 1, elapsedSeconds = 1.2, clipSeconds = 1.0, aborted = false))
+        assertFalse(BeamSelect.remember(wasEarned = true, beam = 5, elapsedSeconds = 2.0, clipSeconds = 1.0, aborted = false))
+        assertFalse(BeamSelect.remember(wasEarned = true, beam = 5, elapsedSeconds = 0.2, clipSeconds = 1.0, aborted = true))
+        assertTrue(BeamSelect.remember(wasEarned = true, beam = 5, elapsedSeconds = 0.2, clipSeconds = 1.0, aborted = false))
+        val unavailable = SpeechHearing.interpret("transcript unavailable")
+        assertEquals("transcript unavailable", unavailable.shown)
+        assertEquals("transcript unavailable", unavailable.raw)
     }
 
     @Test

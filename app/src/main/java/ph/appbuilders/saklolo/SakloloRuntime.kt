@@ -15,6 +15,7 @@ import ph.appbuilders.saklolo.data.MIGRATION_2_3
 import ph.appbuilders.saklolo.data.MIGRATION_3_4
 import ph.appbuilders.saklolo.data.MIGRATION_4_5
 import ph.appbuilders.saklolo.data.MIGRATION_5_6
+import ph.appbuilders.saklolo.data.MIGRATION_6_7
 import ph.appbuilders.saklolo.data.RoomAlertPersistence
 import ph.appbuilders.saklolo.data.RoomDirectPersistence
 import ph.appbuilders.saklolo.data.RoomGroupPersistence
@@ -77,7 +78,7 @@ class SakloloRuntime private constructor(val app: Application) {
         app.getExternalFilesDir(null)?.mkdirs()
         val database = Room.databaseBuilder(app, SakloloDatabase::class.java, "saklolo.db")
             .allowMainThreadQueries()
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
             .fallbackToDestructiveMigration()
             .build()
         store = AlertStore(RoomAlertPersistence(database))

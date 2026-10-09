@@ -12,6 +12,9 @@ internal object WhisperNative {
     external fun freeContext(contextPtr: Long)
 
     @JvmStatic
+    external fun requestAbort()
+
+    @JvmStatic
     external fun transcribe(
         contextPtr: Long,
         audio: FloatArray,
@@ -19,5 +22,6 @@ internal object WhisperNative {
         language: String,
         prompt: String,
         beam: Int,
+        budgetMs: Long,
     ): String?
 }

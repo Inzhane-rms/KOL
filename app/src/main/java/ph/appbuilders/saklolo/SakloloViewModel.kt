@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -39,11 +40,14 @@ import ph.appbuilders.saklolo.contact.ReplyChip
 import ph.appbuilders.saklolo.contact.Identity
 import ph.appbuilders.saklolo.contact.Ptt
 import ph.appbuilders.saklolo.contact.RingLoop
+import ph.appbuilders.saklolo.contact.ClipCommit
 import ph.appbuilders.saklolo.contact.VoiceControl
+import ph.appbuilders.saklolo.contact.WipeSessions
 import ph.appbuilders.saklolo.ask.AskEngine
 import ph.appbuilders.saklolo.ask.AskResult
 import ph.appbuilders.saklolo.ask.AskTurn
 import ph.appbuilders.saklolo.audio.ClipStore
+import ph.appbuilders.saklolo.audio.Waveform
 import ph.appbuilders.saklolo.audio.WavPcm
 import ph.appbuilders.saklolo.contact.Urgent
 import ph.appbuilders.saklolo.group.ConcertGroup
@@ -62,6 +66,7 @@ import ph.appbuilders.saklolo.stt.ModelInstaller
 import ph.appbuilders.saklolo.stt.PcmRecorder
 import ph.appbuilders.saklolo.stt.SentenceCase
 import ph.appbuilders.saklolo.stt.SpeechHearing
+import ph.appbuilders.saklolo.stt.TranscriptLimit
 import ph.appbuilders.saklolo.stt.SpeechLanguage
 import ph.appbuilders.saklolo.stt.WhisperTranscriber
 import ph.appbuilders.saklolo.summary.GemmaSummarizer
@@ -104,6 +109,7 @@ data class CaptionLine(
     val speaker: String,
     val text: String,
     val transcribing: Boolean,
+    val raw: String? = null,
 )
 
 data class CallUi(
@@ -138,7 +144,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     private var recordingStartedAt = 0L
     private var lastPcm: FloatArray? = null
     private var draftGeneration = 0
-    private var recordGeneration = 0
+    @Volatile private var recordGeneration = 0
     private var undoGeneration = 0
     private var heldPcm: FloatArray? = null
     private var player: MediaPlayer? = null
@@ -161,8 +167,8 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     val voice: StateFlow<VoiceUiState> = _voice.asStateFlow()
     private var pendingVoice: GroupNote? = null
     private var sendVoiceWhenReady = false
-    private var voiceEpoch = 0
-    private var voiceSession = 0
+    @Volatile private var voiceEpoch = 0
+    @Volatile private var voiceSession = 0
     private var voicePeer: String? = null
     private val threadRead = HashMap<String, Long>()
     private val playedClips = HashSet<String>()
@@ -206,7 +212,8 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
                 val model = ModelInstaller.ensure(app) { progress ->
                     _sos.update { it.copy(modelStatus = progress) }
                 }
-                transcriber = WhisperTranscriber(ModelInstaller.resolve(app).takeIf { it.exists() } ?: model)
+                val speech = ModelInstaller.resolve(app).takeIf { it.exists() } ?: model
+                transcriber = WhisperTranscriber(speech, app.getSharedPreferences("saklolo_decode", Context.MODE_PRIVATE))
                 _sos.update {
                     it.copy(
                         modelReady = true,
@@ -583,29 +590,70 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Clears local messages, contacts, clips, and preferences. The speech model file stays. */
     fun deleteAllData() {
-        viewModelScope.launch {
-            recordGate.withLock {
-                if (recorder.isRunning) {
-                    runtime.relay.onLocalRecordingFinished()
-                    recorder.stop()
-                }
-            }
-        }
+        val next = WipeSessions(holdSession, voiceEpoch, voiceSession, recordGeneration).bump()
+        voiceEpoch = next.epoch
+        voiceSession = next.voice
+        recordGeneration = next.record
+        holdSession = next.hold
+        runtime.directStore.bumpEpoch()
+        transcriber?.abort()
+        runtime.relay.cancelOutbound()
+        val ending = call.phase != CallPhase.IDLE
         player?.release()
         player = null
         holding = false
         holdElapsed = 0
         transcribingHold = false
         holdMuted = HoldMute.afterEnd()
-        if (call.phase != CallPhase.IDLE) {
+        val endPayloads = if (ending) {
+            syncClock()
+            ring.end(runtime.directMessages.value, deviceId())
+            applyRing()
+            ring.drain()
+        } else {
+            emptyList()
+        }
+        if (!ending) {
             releaseCallAudio()
+            noteCall(CallState())
+        } else {
+            releaseCallAudio()
+            publishCall(emergency = null)
         }
-        noteCall(CallState())
+        runBlocking {
+            recordGate.withLock {
+                if (recorder.isRunning) {
+                    runtime.relay.onLocalRecordingFinished()
+                    recorder.stop()
+                }
+            }
+            withContext(Dispatchers.IO) {
+                for (out in endPayloads) {
+                    val body = when (out.kind) {
+                        Ptt.END -> "End"
+                        Ptt.ACCEPT -> "Accept"
+                        else -> "Decline"
+                    }
+                    val message = DirectMessage(
+                        id = java.util.UUID.randomUUID().toString(),
+                        fromDeviceId = deviceId(),
+                        toDeviceId = out.peerId,
+                        senderName = displayName(),
+                        body = body,
+                        createdAtMillis = System.currentTimeMillis(),
+                        kind = out.kind,
+                    )
+                    runtime.directStore.addLocal(message)
+                    runtime.relay.broadcastDirect(message)
+                }
+                runtime.wipeUserData {
+                    replyCache.clear()
+                    _modelReplies.value = emptyMap()
+                }
+                Waveform.clear()
+            }
+        }
         threadRead.clear()
-        runtime.wipeUserData {
-            replyCache.clear()
-            _modelReplies.value = emptyMap()
-        }
         _call.value = CallUi()
         _voice.value = VoiceUiState()
         _sos.update { it.copy(recording = false, elapsedSec = 0, transcript = "", summary = "", urgency = null) }
@@ -1086,19 +1134,23 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     ) {
         val trimmed = body.trim()
         if (to.isBlank() || (trimmed.isEmpty() && kind == "text")) return
+        val epoch = runtime.directStore.epoch()
+        val message = DirectMessage(
+            id = java.util.UUID.randomUUID().toString(),
+            fromDeviceId = deviceId(),
+            toDeviceId = to,
+            senderName = displayName(),
+            body = trimmed.ifEmpty { kind },
+            createdAtMillis = System.currentTimeMillis(),
+            kind = kind,
+            audioPath = audioPath,
+            rawBody = rawBody?.trim()?.ifEmpty { null },
+        )
         viewModelScope.launch(Dispatchers.IO) {
-            val message = DirectMessage(
-                id = java.util.UUID.randomUUID().toString(),
-                fromDeviceId = deviceId(),
-                toDeviceId = to,
-                senderName = displayName(),
-                body = trimmed.ifEmpty { kind },
-                createdAtMillis = System.currentTimeMillis(),
-                kind = kind,
-                audioPath = audioPath,
-                rawBody = rawBody?.trim()?.ifEmpty { null },
-            )
-            runtime.directStore.addLocal(message)
+            if (runtime.directStore.addIfCurrent(message, epoch) == null) {
+                audioPath?.let { File(it).delete() }
+                return@launch
+            }
             runtime.relay.broadcastDirect(message)
             runtime.refreshDirect()
         }
@@ -1223,6 +1275,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         }
         if (!holding && !recorder.isRunning) return
         val session = holdSession
+        val epoch = runtime.directStore.epoch()
         val peer = call.peerId
         holding = false
         holdElapsed = 0
@@ -1242,14 +1295,14 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
             } else {
                 hear(engine, pcm)
             }
-            if (session != holdSession || holdMuted) return@launch
+            if (!ClipCommit.allow(session, holdSession) || holdMuted) return@launch
             transcribingHold = false
             val body = heard.shown.trim()
             val raw = heard.raw.trim()
             if (body.isNotEmpty() && peer.isNotBlank()) {
                 val id = java.util.UUID.randomUUID().toString()
                 val audioPath = withContext(Dispatchers.IO) { ClipStore.write(runtime.clipsDir, id, pcm) }
-                if (session != holdSession || holdMuted) return@launch
+                if (!ClipCommit.allow(session, holdSession) || holdMuted) return@launch
                 val message = DirectMessage(
                     id = id,
                     fromDeviceId = deviceId(),
@@ -1262,7 +1315,14 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
                     rawBody = raw.take(800).ifEmpty { null },
                 )
                 withContext(Dispatchers.IO) {
-                    runtime.directStore.addLocal(message)
+                    if (!ClipCommit.allow(session, holdSession) || holdMuted) {
+                        audioPath?.let { File(it).delete() }
+                        return@withContext
+                    }
+                    if (runtime.directStore.addIfCurrent(message, epoch) == null) {
+                        audioPath?.let { File(it).delete() }
+                        return@withContext
+                    }
                     runtime.relay.broadcastDirect(message)
                     runtime.refreshDirect()
                 }
@@ -1329,6 +1389,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         val names = contactNames()
         val raw = withContext(Dispatchers.Default) { engine.transcribe(pcm, _sos.value.language.whisperCode, names) }
         val heard = SpeechHearing.interpret(raw, names)
+        if (heard.raw == TranscriptLimit.UNAVAILABLE) return heard
         if (!CaptionCleanup.allowModel(heard.urgency, heard.raw, heard.shown)) return heard
         val cleaned = withContext(Dispatchers.IO) { GemmaSummarizer.cleanupCaption(heard.shown) } ?: return heard
         if (!CaptionCleanup.acceptModel(heard.shown, cleaned)) return heard
@@ -1362,7 +1423,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     private var holdMuted = false
     private var transcribingHold = false
     private var holdElapsed = 0
-    private var holdSession = 0
+    @Volatile private var holdSession = 0
     private var callSerial = 0L
     private var holdStartedAt = 0L
     private var savedMusicVolume = -1
@@ -1417,6 +1478,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
                         speaker = if (mine) "You" else message.senderName,
                         text = CaptionDisplay.text(message.body),
                         transcribing = false,
+                        raw = message.rawBody,
                     )
                 }
             if (transcribingHold) {

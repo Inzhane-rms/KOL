@@ -103,7 +103,7 @@ fun SettingsDialog(
             )
             Text(initial.gemmaStatus, color = InkSoft, fontSize = 14.sp)
             TextButton(onClick = { confirmDelete = true }, modifier = Modifier.height(56.dp)) {
-                Text(stringResource(R.string.legal_delete), color = Color(0xFFB91C1C), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.legal_delete), color = Accent, fontFamily = Poppins, fontSize = 16.sp, fontWeight = FontWeight.Bold)
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 TextButton(onClick = onDismiss, modifier = Modifier.height(56.dp)) {
@@ -198,7 +198,7 @@ private fun DemoField(value: String, onChange: (String) -> Unit) {
         cursorBrush = SolidColor(Ink),
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(0xFFF3F7F5), RoundedCornerShape(12.dp))
+            .background(Page, RoundedCornerShape(12.dp))
             .padding(12.dp),
     )
 }

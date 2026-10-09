@@ -55,6 +55,7 @@ import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -93,6 +94,7 @@ import ph.appbuilders.saklolo.CallUi
 import ph.appbuilders.saklolo.R
 import ph.appbuilders.saklolo.audio.Waveform
 import ph.appbuilders.saklolo.contact.CaptionDisplay
+import ph.appbuilders.saklolo.contact.OriginalCaption
 import ph.appbuilders.saklolo.contact.ChipTapGuard
 import ph.appbuilders.saklolo.contact.ContactRow
 import ph.appbuilders.saklolo.contact.Conversation
@@ -499,11 +501,12 @@ fun KolChat(
                         )
                     }
                     if (own) {
+                        val handedOff = message.sentAtMillis > 0L
                         Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                            if (row.inRange) {
+                            if (handedOff) {
                                 Icon(Icons.Filled.Check, contentDescription = KolNav.SENT, tint = StatusGreen, modifier = Modifier.size(12.dp))
                                 Text(
-                                    KolNav.bubbleStatus(true, clock.format(Date(message.createdAtMillis))),
+                                    KolNav.bubbleStatus(message.sentAtMillis, clock.format(Date(message.sentAtMillis))),
                                     color = InkSoft,
                                     fontFamily = Poppins,
                                     fontSize = 11.sp,
@@ -511,7 +514,7 @@ fun KolChat(
                                 )
                             } else {
                                 Icon(Icons.Filled.Schedule, contentDescription = KolNav.WAITING, tint = Amber, modifier = Modifier.size(16.dp))
-                                Text(KolNav.bubbleStatus(false, ""), color = PillAmberText, fontFamily = Poppins, fontWeight = FontWeight.SemiBold, fontSize = 11.sp, modifier = Modifier.padding(start = 4.dp))
+                                Text(KolNav.bubbleStatus(0L, ""), color = PillAmberText, fontFamily = Poppins, fontWeight = FontWeight.SemiBold, fontSize = 11.sp, modifier = Modifier.padding(start = 4.dp))
                             }
                         }
                     }
@@ -623,15 +626,23 @@ fun KolCall(
                 Text("${KolNav.HOLD_TO_TALK}. Captions stay on this phone.", color = InkSoft, fontFamily = Poppins, fontSize = 13.sp, modifier = Modifier.padding(top = 16.dp))
             }
             call.captions.forEach { line ->
-                val latest = line == call.captions.last()
-                Text(line.speaker, color = InkSoft, fontFamily = Poppins, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
-                Text(
-                    if (line.transcribing) "Transcribing…" else CaptionDisplay.text(line.text),
-                    color = Ink,
-                    fontFamily = Poppins,
-                    fontWeight = if (latest) FontWeight.SemiBold else FontWeight.Normal,
-                    fontSize = if (latest) 16.sp else 14.sp,
-                )
+                key(line.id) {
+                    val latest = line == call.captions.last()
+                    val original = OriginalCaption.line(line.text, line.raw)
+                    var open by rememberSaveable(line.id) { mutableStateOf(false) }
+                    Text(line.speaker, color = InkSoft, fontFamily = Poppins, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
+                    Text(
+                        if (line.transcribing) "Transcribing…" else CaptionDisplay.text(line.text),
+                        color = Ink,
+                        fontFamily = Poppins,
+                        fontWeight = if (latest) FontWeight.SemiBold else FontWeight.Normal,
+                        fontSize = if (latest) 16.sp else 14.sp,
+                        modifier = Modifier.clickable(enabled = original != null) { open = !open },
+                    )
+                    if (open && original != null) {
+                        Text(original, color = InkSoft, fontFamily = Poppins, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
+                    }
+                }
             }
         }
         if (call.emergency != null) {
@@ -1020,7 +1031,18 @@ private fun VoiceBubble(message: DirectMessage, mine: Boolean, onPlay: (String?)
             }
         }
         Text("AI transcript", color = CyanText, fontFamily = Poppins, fontWeight = FontWeight.SemiBold, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp).clip(CircleShape).background(CyanLight).padding(horizontal = 8.dp, vertical = 3.dp))
-        Text("“${CaptionDisplay.text(message.body)}”", color = if (mine) Color.White else Ink, fontFamily = Poppins, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp))
+        val original = OriginalCaption.line(message.body, message.rawBody)
+        var open by rememberSaveable(message.id) { mutableStateOf(false) }
+        Text(
+            "“${CaptionDisplay.text(message.body)}”",
+            color = if (mine) Color.White else Ink,
+            fontFamily = Poppins,
+            fontSize = 14.sp,
+            modifier = Modifier.padding(top = 6.dp).clickable(enabled = original != null) { open = !open },
+        )
+        if (open && original != null) {
+            Text(original, color = if (mine) Color.White.copy(alpha = 0.8f) else InkSoft, fontFamily = Poppins, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+        }
     }
 }
 

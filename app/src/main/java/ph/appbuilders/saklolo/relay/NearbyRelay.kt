@@ -73,6 +73,7 @@ class NearbyRelay(
     private val queueLock = Any()
     private val liveJobs = ArrayDeque<() -> Unit>()
     private val historyJobs = ArrayDeque<() -> Unit>()
+    private val outbound = OutboundGate()
     private var advertisingOk = false
     private var discoveryOk = false
     private var advertisePending = false
@@ -165,10 +166,23 @@ class NearbyRelay(
         return peers.size
     }
 
+    /** Drops queued sends. A job that already started checks the gate again before it hands off. */
+    fun cancelOutbound() {
+        outbound.cancel()
+        synchronized(queueLock) {
+            liveJobs.clear()
+            historyJobs.clear()
+        }
+    }
+
     /** Live work runs before a history dump already queued for a new peer. */
     private fun enqueue(live: Boolean, job: () -> Unit) {
+        val token = outbound.token()
+        val wrapped = {
+            if (outbound.live(token)) job()
+        }
         synchronized(queueLock) {
-            if (live) liveJobs.addLast(job) else historyJobs.addLast(job)
+            if (live) liveJobs.addLast(wrapped) else historyJobs.addLast(wrapped)
         }
         io.execute { drain() }
     }
@@ -414,10 +428,11 @@ class NearbyRelay(
 
     private fun deliverDirect(endpointId: String, messages: List<DirectMessage>, attachClips: Boolean): Boolean {
         if (messages.isEmpty()) return false
+        val token = outbound.token()
         var sent = false
         var current = ArrayList<DirectMessage>()
         fun flush(chunk: List<DirectMessage>) {
-            if (chunk.isEmpty()) return
+            if (chunk.isEmpty() || !outbound.live(token)) return
             val prepared = chunk.map { if (attachClips) it else it.copy(audioPath = null) }
             val files = if (attachClips) prepareFiles(prepared.map { it.id to it.audioPath }) else emptyList()
             val bytes = AlertJson.encodeEnvelope(
@@ -441,14 +456,18 @@ class NearbyRelay(
             val bytesAt = ordered.indexOfFirst { it.kind != PieceKind.FILE }
             if (bytesAt == -1) return
             if (fileAt != -1 && fileAt < bytesAt) return
+            if (!outbound.live(token)) return
             val result = runCatching { client.sendPayload(endpointId, Payload.fromBytes(bytes)) }
             Log.d(
                 BLINK,
                 "send type=direct ids=${prepared.joinToString(",") { it.id }} to=$endpointId size=${bytes.size} clips=${files.size} result=${result.isSuccess}",
             )
-            if (result.isSuccess) {
+            if (result.isSuccess && outbound.live(token)) {
                 if (fileAt != -1) sendFiles(endpointId, files, note = false, direct = true)
                 sent = true
+                if (directStore.markSent(prepared.map { it.id }, System.currentTimeMillis())) {
+                    onDirectChanged()
+                }
             }
         }
         for (message in messages) {
@@ -794,6 +813,18 @@ class NearbyRelay(
         const val SERVICE_ID = "ph.appbuilders.saklolo.relay"
         private const val MAX_PAYLOAD = NoteRelay.MAX_BYTES
     }
+}
+
+/** A cancelled generation makes queued and in-flight handoffs skip the send. */
+class OutboundGate {
+    private val lock = Any()
+    private var generation = 0
+
+    fun token(): Int = synchronized(lock) { generation }
+
+    fun cancel(): Int = synchronized(lock) { ++generation }
+
+    fun live(token: Int): Boolean = synchronized(lock) { token == generation }
 }
 
 internal fun blinkFailure(error: Exception): String {

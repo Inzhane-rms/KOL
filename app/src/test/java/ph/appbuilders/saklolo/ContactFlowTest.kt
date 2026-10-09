@@ -15,9 +15,11 @@ import ph.appbuilders.saklolo.contact.DirectStore
 import ph.appbuilders.saklolo.contact.Identity
 import ph.appbuilders.saklolo.contact.MemoryDirectPersistence
 import ph.appbuilders.saklolo.contact.MeshPhone
+import ph.appbuilders.saklolo.contact.OriginalCaption
 import ph.appbuilders.saklolo.contact.Ptt
 import ph.appbuilders.saklolo.contact.ResyncPlan
 import ph.appbuilders.saklolo.contact.VoiceControl
+import ph.appbuilders.saklolo.contact.toDirect
 import ph.appbuilders.saklolo.contact.toWire
 import ph.appbuilders.saklolo.group.VoiceSheet
 import ph.appbuilders.saklolo.model.AlertJson
@@ -194,13 +196,20 @@ class ContactFlowTest {
             fromDeviceId = "phone-ana1",
             toDeviceId = "phone-ben1",
             senderName = "Ana",
-            body = "hi",
+            body = "Nahimatay si Ana.",
             createdAtMillis = 9,
             kind = "text",
+            rawBody = "nahimatay si ana",
+            sentAtMillis = 42L,
         )
         val encoded = AlertJson.encodeEnvelope(emptyList(), direct = listOf(message.toWire()))
-        val decoded = AlertJson.decodeEnvelope(encoded).direct.single()
+        val decoded = AlertJson.decodeEnvelope(encoded).direct.single().toDirect()
         assertEquals("phone-ben1", decoded.toDeviceId)
-        assertEquals("hi", decoded.body)
+        assertEquals("Nahimatay si Ana.", decoded.body)
+        assertEquals("nahimatay si ana", decoded.rawBody)
+        assertEquals(0L, decoded.sentAtMillis)
+        assertEquals("Original: nahimatay si ana", OriginalCaption.line(decoded.body, decoded.rawBody))
+        assertEquals(null, OriginalCaption.line("Hi", "hi"))
+        assertEquals(null, OriginalCaption.line("Hi", "  "))
     }
 }

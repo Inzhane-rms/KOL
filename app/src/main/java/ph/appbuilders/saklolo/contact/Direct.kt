@@ -36,8 +36,10 @@ data class DirectMessage(
     val kind: String = "text",
     val audioPath: String? = null,
     val localOrigin: Boolean = false,
-    /** Whisper text before lexicon correction. Stays on this phone. */
+    /** Whisper text before lexicon correction. Travels with the message. */
     val rawBody: String? = null,
+    /** Millis when Nearby accepted the payload. 0 until that handoff. Never cleared, and not on the wire. */
+    val sentAtMillis: Long = 0,
 )
 
 data class DirectSnapshot(
@@ -184,6 +186,16 @@ object CaptionDisplay {
     fun text(transcript: String): String = transcript.trim()
 }
 
+/** Shown when a transcript is expanded. Hidden when the raw line is blank or the same as the shown line. */
+object OriginalCaption {
+    fun line(shown: String, raw: String?): String? {
+        val source = raw?.trim().orEmpty()
+        if (source.isEmpty()) return null
+        if (source.equals(shown.trim(), ignoreCase = true)) return null
+        return "Original: $source"
+    }
+}
+
 object Urgent {
     const val KIND = "urgent"
     const val BADGE = "Urgent"
@@ -295,11 +307,22 @@ object VoiceControl {
         actionSession == liveSession && recorderRunning
 }
 
+/** A clip may be saved or sent only while the session that started it is still the live one. */
+object ClipCommit {
+    fun allow(started: Int, live: Int): Boolean = started == live
+}
+
+/** Counts a wipe so an in-flight clip sees that its session moved. */
+data class WipeSessions(val hold: Int, val epoch: Int, val voice: Int, val record: Int) {
+    fun bump(): WipeSessions = WipeSessions(hold + 1, epoch + 1, voice + 1, record + 1)
+}
+
 class DirectStore(private val persistence: DirectPersistence) {
     private val lock = Any()
     private val messages = linkedMapOf<String, DirectMessage>()
     private val contacts = linkedMapOf<String, SavedContact>()
     private var nearby: Set<String> = emptySet()
+    private var commitEpoch = 0
     var myId: String = ""
     private val disk = java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "saklolo-direct")
@@ -324,11 +347,37 @@ class DirectStore(private val persistence: DirectPersistence) {
         DirectSnapshot(contacts.values.toList(), messages.values.toList())
     }
 
-    fun addLocal(message: DirectMessage): DirectMessage = synchronized(lock) {
+    fun epoch(): Int = synchronized(lock) { commitEpoch }
+
+    fun bumpEpoch(): Int = synchronized(lock) { ++commitEpoch }
+
+    fun addLocal(message: DirectMessage): DirectMessage = synchronized(lock) { commitLocked(message) }
+
+    /** Returns null when [epoch] is older than a wipe, so a stale clip cannot land after the wipe. */
+    fun addIfCurrent(message: DirectMessage, epoch: Int): DirectMessage? = synchronized(lock) {
+        if (epoch != commitEpoch) return null
+        commitLocked(message)
+    }
+
+    private fun commitLocked(message: DirectMessage): DirectMessage {
         val stored = message.copy(hops = 0, localOrigin = true)
         messages[stored.id] = stored
         persistLocked()
-        stored
+        return stored
+    }
+
+    /** Sets the handoff time once. A later call never clears or replaces it. */
+    fun markSent(ids: Collection<String>, now: Long): Boolean = synchronized(lock) {
+        if (now <= 0L) return false
+        var changed = false
+        for (id in ids) {
+            val current = messages[id] ?: continue
+            if (current.sentAtMillis > 0L) continue
+            messages[id] = current.copy(sentAtMillis = now)
+            changed = true
+        }
+        if (changed) persistLocked()
+        return changed
     }
 
     fun ingest(incoming: List<DirectMessage>, receivedAt: Long): List<DirectMessage> = synchronized(lock) {
@@ -551,6 +600,7 @@ fun DirectMessage.toWire() = WireDirect(
     createdAtMillis = createdAtMillis,
     hops = hops,
     kind = kind,
+    rawBody = rawBody,
 )
 
 fun WireDirect.toDirect(audioPath: String? = null) = DirectMessage(
@@ -563,4 +613,5 @@ fun WireDirect.toDirect(audioPath: String? = null) = DirectMessage(
     hops = hops,
     kind = kind,
     audioPath = audioPath,
+    rawBody = rawBody,
 )
