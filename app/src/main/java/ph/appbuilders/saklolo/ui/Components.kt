@@ -33,6 +33,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -131,6 +132,10 @@ fun SosOrb(
     diameter: Dp = 148.dp,
 ) {
     var pressed by remember { mutableStateOf(false) }
+    val recordingNow by rememberUpdatedState(recording)
+    val enabledNow by rememberUpdatedState(enabled)
+    val startNow by rememberUpdatedState(onHoldStart)
+    val endNow by rememberUpdatedState(onHoldEnd)
     val pressScale by animateFloatAsState(
         targetValue = if (pressed) 0.95f else 1f,
         animationSpec = tween(100),
@@ -163,15 +168,16 @@ fun SosOrb(
                 .scale(pressScale)
                 .clip(CircleShape)
                 .background(CriticalRed)
-                .pointerInput(enabled, recording) {
-                    if (!enabled && !recording) return@pointerInput
+                .pointerInput(Unit) {
                     detectTapGestures(
                         onPress = {
-                            pressed = true
-                            if (!recording) onHoldStart()
-                            tryAwaitRelease()
-                            pressed = false
-                            onHoldEnd()
+                            if (enabledNow || recordingNow) {
+                                pressed = true
+                                if (!recordingNow) startNow()
+                                tryAwaitRelease()
+                                pressed = false
+                                endNow()
+                            }
                         },
                     )
                 },

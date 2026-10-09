@@ -54,7 +54,7 @@ object GemmaSummarizer {
             var ok = false
             try {
                 ok = createEngine(appContext)
-            } catch (error: Exception) {
+            } catch (error: Throwable) {
                 Log.w(TAG, "model load failed", error)
             } finally {
                 policy.finishLoad(ok)
@@ -124,17 +124,26 @@ object GemmaSummarizer {
     }
 
     private fun <T> infer(fallback: T, block: () -> T): T {
+        if (!policy.tryBeginInference()) return fallback
         val timedOut = AtomicBoolean(false)
-        val future = executor.submit<T> {
-            try {
-                val value = block()
-                if (!timedOut.get()) policy.noteInferenceSuccess()
-                value
-            } catch (error: Exception) {
-                Log.w(TAG, "inference failed", error)
-                if (!timedOut.get()) policy.noteInferenceFailure()
-                fallback
+        val future = try {
+            executor.submit<T> {
+                try {
+                    val value = block()
+                    if (!timedOut.get()) policy.noteInferenceSuccess()
+                    value
+                } catch (error: Exception) {
+                    Log.w(TAG, "inference failed", error)
+                    if (!timedOut.get()) policy.noteInferenceFailure()
+                    fallback
+                } finally {
+                    policy.finishInference()
+                }
             }
+        } catch (error: Throwable) {
+            policy.finishInference()
+            Log.w(TAG, "inference submit failed", error)
+            return fallback
         }
         return try {
             future.get(GemmaAttemptPolicy.INFERENCE_TIMEOUT_SECONDS, TimeUnit.SECONDS)

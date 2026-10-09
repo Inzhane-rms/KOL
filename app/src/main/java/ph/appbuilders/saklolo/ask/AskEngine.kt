@@ -162,6 +162,8 @@ data class QaPair(
 
 data class AskSuggestion(val label: String, val question: String)
 
+data class AskTurn(val id: Long, val question: String, val result: AskResult)
+
 sealed class AskResult {
     data class Emergency(val answerTl: String, val answerEn: String) : AskResult()
     data class Tip(

@@ -11,6 +11,7 @@ import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.app.ActivityCompat
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -31,6 +32,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -47,12 +49,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import ph.appbuilders.saklolo.SakloloViewModel
 import ph.appbuilders.saklolo.SosUiState
 import ph.appbuilders.saklolo.model.Alert
+import ph.appbuilders.saklolo.relay.RelayPermissions
 import ph.appbuilders.saklolo.relay.RelayService
 import ph.appbuilders.saklolo.triage.Urgency
 import ph.appbuilders.saklolo.ui.theme.ForestMint
@@ -68,20 +74,26 @@ private const val FEED = "feed"
 fun SakloloApp(viewModel: SakloloViewModel) {
     val sos by viewModel.sos.collectAsStateWithLifecycle()
     val alerts by viewModel.alerts.collectAsStateWithLifecycle()
+    val askTurns by viewModel.askTurns.collectAsStateWithLifecycle()
     val peers by viewModel.peers.collectAsStateWithLifecycle()
     val notice by viewModel.notice.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     var route by remember { mutableStateOf(RECORD) }
     var settingsOpen by remember { mutableStateOf(false) }
     var qrAlert by remember { mutableStateOf<Alert?>(null) }
     var askedBattery by remember { mutableStateOf(false) }
+    var askedMic by remember { mutableStateOf(false) }
+    var micBlocked by remember { mutableStateOf(false) }
 
     val permissions = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { granted ->
+        askedMic = true
         val locationOk = granted[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
             granted[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         if (locationOk) viewModel.onLocationPermissionGranted()
+        syncPermissions(context, askedMic = true) { blocked -> micBlocked = blocked }
         if (!askedBattery) {
             askedBattery = true
             (context as? Activity)?.let { askBatteryExemption(it) }
@@ -91,10 +103,25 @@ fun SakloloApp(viewModel: SakloloViewModel) {
         result.contents?.let(viewModel::ingestQr)
     }
 
+    DisposableEffect(lifecycleOwner, context, askedMic) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val locationOk = hasPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ||
+                    hasPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION)
+                if (locationOk) viewModel.onLocationPermissionGranted()
+                syncPermissions(context, askedMic) { blocked -> micBlocked = blocked }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     LaunchedEffect(Unit) {
-        permissions.launch(requiredPermissions())
-        viewModel.onLocationPermissionGranted()
-        ContextCompat.startForegroundService(context, Intent(context, RelayService::class.java))
+        if (!RelayPermissions.granted(context)) {
+            permissions.launch(requiredPermissions())
+        } else {
+            syncPermissions(context, askedMic) { blocked -> micBlocked = blocked }
+        }
     }
 
     val lastAlert = sos.sentAlertId?.let { id -> alerts.firstOrNull { it.id == id } }
@@ -113,7 +140,11 @@ fun SakloloApp(viewModel: SakloloViewModel) {
             ScreenHeading(route, alerts, sos)
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 if (route == ASK) {
-                    AskScreen(onOpenRecorder = { route = RECORD })
+                    AskScreen(
+                        turns = askTurns,
+                        onAsk = viewModel::submitAsk,
+                        onOpenRecorder = { route = RECORD },
+                    )
                 } else if (route == RECORD) {
                     SosScreen(
                         state = sos,
@@ -122,7 +153,11 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                         clipReady = viewModel::clipReady,
                         onHoldStart = {
                             if (hasPermission(context, Manifest.permission.RECORD_AUDIO)) {
+                                micBlocked = false
                                 viewModel.startRecording()
+                            } else if (micIsPermanentlyDenied(context)) {
+                                askedMic = true
+                                micBlocked = true
                             } else {
                                 permissions.launch(requiredPermissions())
                             }
@@ -132,6 +167,8 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                         onSend = viewModel::sendDraft,
                         onDiscard = viewModel::discardDraft,
                         onPlay = viewModel::playClip,
+                        micBlocked = micBlocked,
+                        onOpenAppSettings = { openAppSettings(context) },
                     )
                 } else {
                     ResponderScreen(
@@ -312,6 +349,31 @@ private fun requiredPermissions(): Array<String> {
         permissions += Manifest.permission.POST_NOTIFICATIONS
     }
     return permissions.toTypedArray()
+}
+
+private fun syncPermissions(context: Context, askedMic: Boolean, onMicBlocked: (Boolean) -> Unit) {
+    if (RelayPermissions.granted(context)) {
+        ContextCompat.startForegroundService(context, Intent(context, RelayService::class.java))
+    }
+    if (hasPermission(context, Manifest.permission.RECORD_AUDIO)) {
+        onMicBlocked(false)
+    } else if (askedMic && micIsPermanentlyDenied(context)) {
+        onMicBlocked(true)
+    }
+}
+
+private fun micIsPermanentlyDenied(context: Context): Boolean {
+    val activity = context as? Activity ?: return false
+    if (hasPermission(context, Manifest.permission.RECORD_AUDIO)) return false
+    return !ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.RECORD_AUDIO)
+}
+
+private fun openAppSettings(context: Context) {
+    val intent = Intent(
+        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+        Uri.parse("package:${context.packageName}"),
+    )
+    runCatching { context.startActivity(intent) }
 }
 
 private fun hasPermission(context: Context, permission: String): Boolean =

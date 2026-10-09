@@ -8,8 +8,11 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import ph.appbuilders.saklolo.audio.WavPcm
+import java.io.ByteArrayInputStream
+import ph.appbuilders.saklolo.relay.ClipRelay
 import ph.appbuilders.saklolo.relay.PeerFilter
 import ph.appbuilders.saklolo.relay.RelayEndpoints
+import ph.appbuilders.saklolo.relay.RelayPermissions
 import ph.appbuilders.saklolo.relay.parseAllowlist
 import ph.appbuilders.saklolo.stt.SpeechLanguage
 import ph.appbuilders.saklolo.triage.SummaryRefine
@@ -49,6 +52,55 @@ class ReviewFixesTest {
         assertEquals(0, book.connectedCount())
         assertEquals(0, book.pendingCount())
         assertTrue(book.tryBeginConnect("b", "Other"))
+    }
+
+    @Test
+    fun failedRelayStartCanBeTriedAgain() {
+        val book = RelayEndpoints()
+        assertEquals(RelayEndpoints.SessionStart.FRESH, book.beginSession("Camon 40"))
+        assertTrue(book.isRunning())
+        assertTrue(book.tryBeginConnect("a", "Spark 30"))
+        book.markConnected("a", "Spark 30", now = 10L)
+        book.noteStartFailed()
+        assertFalse(book.isRunning())
+        assertEquals("Spark 30", book.snapshot().single().name)
+        assertFalse(book.tryBeginConnect("b", "Other"))
+        assertEquals(RelayEndpoints.SessionStart.FRESH, book.beginSession("Camon 40"))
+        assertTrue(book.isRunning())
+        assertTrue(book.tryBeginConnect("b", "Other"))
+    }
+
+    @Test
+    fun relayPermissionsGrowWithSdk() {
+        val legacy = RelayPermissions.required(26)
+        assertEquals(listOf(android.Manifest.permission.ACCESS_FINE_LOCATION), legacy)
+        val android12 = RelayPermissions.required(31)
+        assertTrue(android12.contains(android.Manifest.permission.BLUETOOTH_ADVERTISE))
+        assertTrue(android12.contains(android.Manifest.permission.BLUETOOTH_SCAN))
+        assertTrue(android12.contains(android.Manifest.permission.BLUETOOTH_CONNECT))
+        assertFalse(android12.contains(android.Manifest.permission.NEARBY_WIFI_DEVICES))
+        val android13 = RelayPermissions.required(33)
+        assertTrue(android13.contains(android.Manifest.permission.NEARBY_WIFI_DEVICES))
+        assertFalse(android13.contains(android.Manifest.permission.RECORD_AUDIO))
+    }
+
+    @Test
+    fun reconnectSendsOnlyRecentClipsAndPendingWavsAreRemoved() {
+        val now = 1_000_000L
+        assertTrue(ClipRelay.includeClip(now - 60_000L, now, force = false))
+        assertFalse(ClipRelay.includeClip(now - ClipRelay.RECENT_CLIP_MS - 1, now, force = false))
+        assertTrue(ClipRelay.includeClip(now - ClipRelay.RECENT_CLIP_MS - 1, now, force = true))
+        assertFalse(ClipRelay.includeClip(now + 5_000L, now, force = false))
+        val dir = File.createTempFile("clips", "").also { it.delete(); it.mkdirs() }
+        val pending = File(dir, "pending-9.wav")
+        pending.writeBytes(byteArrayOf(1, 2, 3))
+        File(dir, "keep.wav").writeBytes(byteArrayOf(4))
+        ClipRelay.deletePending(dir)
+        assertFalse(pending.exists())
+        assertTrue(File(dir, "keep.wav").exists())
+        val dest = File(dir, "copied.wav")
+        assertTrue(ClipRelay.copyStream(ByteArrayInputStream(byteArrayOf(9, 8, 7)), dest))
+        assertEquals(3, dest.length().toInt())
     }
 
     @Test

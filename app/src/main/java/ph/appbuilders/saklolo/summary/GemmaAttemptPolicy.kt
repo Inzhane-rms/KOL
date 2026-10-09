@@ -12,6 +12,7 @@ class GemmaAttemptPolicy {
     private var ready = false
     private var loading = false
     private var failures = 0
+    private var inferenceRunning = false
 
     val gaveUp: Boolean get() = synchronized(lock) { failures >= MAX_FAILURES }
 
@@ -49,6 +50,22 @@ class GemmaAttemptPolicy {
     /** A slow generateResponse is not a failed attempt and does not burn the retry. */
     fun noteInferenceTimeout() = synchronized(lock) {
     }
+
+    /**
+     * One inference at a time. A timed-out native call keeps the worker busy,
+     * so the next alert must skip Gemma instead of waiting behind it.
+     */
+    fun tryBeginInference(): Boolean = synchronized(lock) {
+        if (inferenceRunning) return false
+        inferenceRunning = true
+        true
+    }
+
+    fun finishInference() = synchronized(lock) {
+        inferenceRunning = false
+    }
+
+    fun isInferenceRunning(): Boolean = synchronized(lock) { inferenceRunning }
 
     fun plan(eligible: Boolean, engineReady: Boolean): GemmaRefinePlan = synchronized(lock) {
         if (!eligible || failures >= MAX_FAILURES) return GemmaRefinePlan.SKIP

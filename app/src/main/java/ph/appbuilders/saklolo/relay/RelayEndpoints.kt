@@ -40,6 +40,14 @@ class RelayEndpoints {
 
     fun isRunning(): Boolean = synchronized(lock) { running }
 
+    /**
+     * Advertising or discovery failed. The next [beginSession] must be a fresh
+     * start, not a no-op while [running] is still true.
+     */
+    fun noteStartFailed() = synchronized(lock) {
+        running = false
+    }
+
     /** @return true when this endpoint was newly marked pending */
     fun tryBeginConnect(endpointId: String, name: String): Boolean = synchronized(lock) {
         if (!running || !filter.allows(name)) return false

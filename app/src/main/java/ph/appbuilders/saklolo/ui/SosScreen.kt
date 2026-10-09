@@ -53,6 +53,8 @@ fun SosScreen(
     onSend: () -> Unit,
     onDiscard: () -> Unit,
     onPlay: (Alert) -> Unit,
+    micBlocked: Boolean = false,
+    onOpenAppSettings: () -> Unit = {},
 ) {
     var tipIndex by remember { mutableIntStateOf(0) }
     LaunchedEffect(Unit) {
@@ -70,6 +72,21 @@ fun SosScreen(
             .padding(bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
+        if (micBlocked) {
+            Column(
+                Modifier.flatCard(Color.White).padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    "The microphone is blocked. Allow it in settings to record an SOS.",
+                    color = Ink,
+                    fontSize = 16.sp,
+                )
+                TextButton(onClick = onOpenAppSettings, modifier = Modifier.height(48.dp)) {
+                    Text("Open settings", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
         HeroCard(state, peers.size, onHoldStart, onHoldEnd)
         if (state.actionable && state.urgency != null) {
             DraftCard(state, onTranscript, onSend, onDiscard)

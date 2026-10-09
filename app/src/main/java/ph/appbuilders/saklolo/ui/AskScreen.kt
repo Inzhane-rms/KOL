@@ -29,10 +29,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,55 +43,32 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import ph.appbuilders.saklolo.ask.AskEngine
 import ph.appbuilders.saklolo.ask.AskResult
+import ph.appbuilders.saklolo.ask.AskTurn
 import ph.appbuilders.saklolo.ask.SafetyBank
-import ph.appbuilders.saklolo.summary.GemmaSummarizer
 import ph.appbuilders.saklolo.ui.theme.CriticalRed
 import ph.appbuilders.saklolo.ui.theme.ForestMid
 import ph.appbuilders.saklolo.ui.theme.Ink
 import ph.appbuilders.saklolo.ui.theme.InkSoft
 import ph.appbuilders.saklolo.ui.theme.MintWash
 
-private data class AskTurn(val id: Long, val question: String, val result: AskResult)
-
 @Composable
-fun AskScreen(onOpenRecorder: () -> Unit) {
+fun AskScreen(
+    turns: List<AskTurn>,
+    onAsk: (String) -> Unit,
+    onOpenRecorder: () -> Unit,
+) {
     val context = LocalContext.current
     val bank = remember { loadBank(context) }
     val suggestions = remember(bank) { AskEngine.suggestions(bank) }
     var draft by remember { mutableStateOf("") }
-    var turns by remember { mutableStateOf(listOf<AskTurn>()) }
-    var nextId by remember { mutableLongStateOf(1L) }
-    val scope = rememberCoroutineScope()
     val scroll = rememberScrollState()
 
     fun ask(text: String) {
-        val trimmed = text.trim()
-        if (trimmed.isEmpty()) return
-        val rules = AskEngine.answer(trimmed, bank)
-        val id = nextId
-        nextId += 1
-        turns = turns + AskTurn(id, trimmed, rules)
+        if (text.isBlank()) return
         draft = ""
-        if (rules !is AskResult.Fallback || !GemmaSummarizer.mightRun(context)) return
-        val catalog = bank.pairs.joinToString("\n") { pair ->
-            "${pair.id}. ${pair.questionTl} / ${pair.questionEn}"
-        }
-        val valid = bank.pairs.map { it.id }.toSet()
-        scope.launch {
-            val chosen = withContext(Dispatchers.IO) {
-                GemmaSummarizer.chooseAskPair(context, trimmed, catalog, valid)
-            } ?: return@launch
-            val pair = bank.pairs.firstOrNull { it.id == chosen } ?: return@launch
-            val tip = AskEngine.tipFor(pair)
-            turns = turns.map { turn ->
-                if (turn.id == id && turn.result is AskResult.Fallback) turn.copy(result = tip) else turn
-            }
-        }
+        onAsk(text)
     }
 
     LaunchedEffect(turns.size) {
