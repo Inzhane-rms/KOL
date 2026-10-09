@@ -35,7 +35,6 @@ import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.QrCode
 import androidx.compose.material3.Icon
@@ -67,6 +66,7 @@ import ph.appbuilders.saklolo.contact.ContactRow
 import ph.appbuilders.saklolo.contact.Conversation
 import ph.appbuilders.saklolo.contact.DirectMessage
 import ph.appbuilders.saklolo.contact.NameChoice
+import ph.appbuilders.saklolo.contact.Urgent
 import ph.appbuilders.saklolo.ui.theme.Accent
 import ph.appbuilders.saklolo.ui.theme.Amber
 import ph.appbuilders.saklolo.ui.theme.CardWhite
@@ -78,6 +78,8 @@ import ph.appbuilders.saklolo.ui.theme.Ink
 import ph.appbuilders.saklolo.ui.theme.InkSoft
 import ph.appbuilders.saklolo.ui.theme.LightRed
 import ph.appbuilders.saklolo.ui.theme.Page
+import ph.appbuilders.saklolo.ui.theme.PillAmberBg
+import ph.appbuilders.saklolo.ui.theme.PillAmberText
 import ph.appbuilders.saklolo.ui.theme.Poppins
 import ph.appbuilders.saklolo.ui.theme.StatusGreen
 import ph.appbuilders.saklolo.ui.theme.Violet
@@ -138,7 +140,6 @@ fun V17Scaffold(
     onMessages: () -> Unit,
     onCall: () -> Unit,
     onAdd: () -> Unit,
-    onSos: () -> Unit,
     overlay: (@Composable () -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
@@ -183,7 +184,6 @@ fun V17Scaffold(
                 onMessages = onMessages,
                 onCall = onCall,
                 onAdd = onAdd,
-                onSos = onSos,
                 modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding(),
             )
         }
@@ -198,7 +198,6 @@ private fun V17TabBar(
     onMessages: () -> Unit,
     onCall: () -> Unit,
     onAdd: () -> Unit,
-    onSos: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier.fillMaxWidth().height(92.dp), contentAlignment = Alignment.BottomCenter) {
@@ -213,11 +212,14 @@ private fun V17TabBar(
                 .padding(horizontal = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TabItem("Contacts", Icons.Filled.Person, route == "contacts", false, 0, onContacts, Modifier.weight(1f))
-            TabItem("Messages", Icons.Outlined.ChatBubbleOutline, route == "messages", false, unread, onMessages, Modifier.weight(1f))
+            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                TabItem("Contacts", Icons.Filled.Person, route == MainNav.CONTACTS, 0, onContacts, Modifier.weight(1f))
+                TabItem("Messages", Icons.Outlined.ChatBubbleOutline, route == MainNav.MESSAGES, unread, onMessages, Modifier.weight(1f))
+            }
             Spacer(Modifier.width(68.dp))
-            TabItem("Add", Icons.Outlined.QrCode, route == "add", false, 0, onAdd, Modifier.weight(1f))
-            TabItem("SOS", Icons.Filled.Warning, route == "sos", true, 0, onSos, Modifier.weight(1f))
+            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                TabItem("Add", Icons.Outlined.QrCode, route == MainNav.ADD, 0, onAdd, Modifier)
+            }
         }
         Box(
             Modifier
@@ -238,16 +240,11 @@ private fun TabItem(
     label: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     selected: Boolean,
-    sos: Boolean,
     badge: Int,
     onClick: () -> Unit,
     modifier: Modifier,
 ) {
-    val tint = when {
-        sos -> Accent
-        selected -> Violet
-        else -> InkSoft
-    }
+    val tint = if (selected) Violet else InkSoft
     Column(
         modifier.height(62.dp).clip(RoundedCornerShape(16.dp)).clickable(onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -257,7 +254,7 @@ private fun TabItem(
             Box(
                 Modifier
                     .clip(RoundedCornerShape(12.dp))
-                    .background(if (sos) LightRed else if (selected) VioletLight else Color.Transparent)
+                    .background(if (selected) VioletLight else Color.Transparent)
                     .padding(horizontal = 10.dp, vertical = 2.dp),
             ) {
                 Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(20.dp))
@@ -275,7 +272,7 @@ private fun TabItem(
                 }
             }
         }
-        Text(label, color = tint, fontFamily = Poppins, fontWeight = if (selected || sos) FontWeight.Bold else FontWeight.Normal, fontSize = 11.sp)
+        Text(label, color = tint, fontFamily = Poppins, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal, fontSize = 11.sp)
     }
 }
 
@@ -290,13 +287,26 @@ fun OfflinePill(right: String? = null, onRight: (() -> Unit)? = null, modifier: 
             Text("Offline · on-device AI", color = Ink, fontFamily = Poppins, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, modifier = Modifier.padding(start = 8.dp))
         }
         if (right != null) {
+            val setup = right.startsWith("Setup")
             val tap = if (onRight != null) Modifier.clickable(onClick = onRight) else Modifier
             Row(
-                tap.height(36.dp).clip(CircleShape).background(CardWhite).border(1.dp, Hairline, CircleShape).padding(horizontal = 12.dp),
+                tap
+                    .height(36.dp)
+                    .clip(CircleShape)
+                    .background(if (setup) PillAmberBg else CardWhite)
+                    .border(1.dp, if (setup) Amber else Hairline, CircleShape)
+                    .padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Box(Modifier.size(8.dp).clip(CircleShape).background(if (right.startsWith("Setup")) Accent else Cyan))
-                Text(right, color = Ink, fontFamily = Poppins, fontWeight = FontWeight.Bold, fontSize = 12.sp, modifier = Modifier.padding(start = 8.dp))
+                Box(Modifier.size(8.dp).clip(CircleShape).background(if (setup) Amber else Cyan))
+                Text(
+                    right,
+                    color = if (setup) PillAmberText else Ink,
+                    fontFamily = Poppins,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
             }
         }
     }
@@ -515,14 +525,23 @@ fun V17Thread(
                     VoiceBubble(message, own, onPlay)
                 } else {
                     val label = if (message.kind == "ping") "Ping" else CaptionDisplay.text(message.body)
+                    val urgent = Urgent.flagged(message.kind)
                     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = if (own) Arrangement.End else Arrangement.Start) {
-                        Text(
-                            label,
-                            color = if (own) Color.White else Ink,
-                            fontFamily = Poppins,
-                            fontSize = 13.sp,
-                            modifier = Modifier.clip(RoundedCornerShape(19.dp)).background(if (own) Violet else Page).padding(horizontal = 14.dp, vertical = 10.dp),
-                        )
+                        Column(horizontalAlignment = if (own) Alignment.End else Alignment.Start) {
+                            if (urgent) UrgentBadge()
+                            Text(
+                                label,
+                                color = if (own && !urgent) Color.White else Ink,
+                                fontFamily = Poppins,
+                                fontSize = 13.sp,
+                                modifier = Modifier
+                                    .padding(top = if (urgent) 4.dp else 0.dp)
+                                    .clip(RoundedCornerShape(19.dp))
+                                    .background(if (urgent) LightRed else if (own) Violet else Page)
+                                    .border(if (urgent) 1.dp else 0.dp, if (urgent) Accent else Color.Transparent, RoundedCornerShape(19.dp))
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                            )
+                        }
                     }
                 }
             }
@@ -579,6 +598,18 @@ private fun VoiceBubble(message: DirectMessage, mine: Boolean, onPlay: (String?)
 }
 
 @Composable
+private fun UrgentBadge() {
+    Text(
+        Urgent.BADGE,
+        color = Color.White,
+        fontFamily = Poppins,
+        fontWeight = FontWeight.Bold,
+        fontSize = 10.sp,
+        modifier = Modifier.clip(CircleShape).background(Accent).padding(horizontal = 8.dp, vertical = 2.dp),
+    )
+}
+
+@Composable
 private fun ActionPill(label: String, tint: Color, fill: Color, modifier: Modifier, onClick: () -> Unit) {
     Box(
         modifier.height(56.dp).clip(RoundedCornerShape(28.dp)).background(fill).border(1.dp, tint.copy(alpha = 0.5f), RoundedCornerShape(28.dp)).clickable(onClick = onClick),
@@ -592,7 +623,7 @@ private fun ActionPill(label: String, tint: Color, fill: Color, modifier: Modifi
 fun V17InCall(
     call: CallUi,
     inRange: Boolean,
-    onSos: () -> Unit,
+    onUrgent: () -> Unit,
     onDismiss: () -> Unit,
     onHoldStart: () -> Unit,
     onHoldEnd: () -> Unit,
@@ -633,8 +664,8 @@ fun V17InCall(
                 Text("“${CaptionDisplay.text(call.emergency)}”", color = Accent, fontFamily = Poppins, fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text("AI · on-device", color = CyanText, fontFamily = Poppins, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
                 Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Box(Modifier.weight(1.4f).height(56.dp).clip(RoundedCornerShape(28.dp)).background(Accent).clickable(onClick = onSos), contentAlignment = Alignment.Center) {
-                        Text("Send SOS", color = Color.White, fontFamily = Poppins, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    Box(Modifier.weight(1.4f).height(56.dp).clip(RoundedCornerShape(28.dp)).background(Accent).clickable(onClick = onUrgent), contentAlignment = Alignment.Center) {
+                        Text("Send urgent", color = Color.White, fontFamily = Poppins, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                     }
                     Box(Modifier.weight(1f).height(56.dp).clip(RoundedCornerShape(28.dp)).background(CardWhite).border(1.dp, Color(0xFFF9CFCF), RoundedCornerShape(28.dp)).clickable(onClick = onDismiss), contentAlignment = Alignment.Center) {
                         Text("Dismiss", color = Ink, fontFamily = Poppins, fontWeight = FontWeight.Bold, fontSize = 14.sp)
@@ -871,7 +902,7 @@ fun V17Messages(
     onQuery: (String) -> Unit,
     now: Long,
     onOpen: (Conversation) -> Unit,
-    onSos: (Conversation) -> Unit,
+    onUrgent: (Conversation) -> Unit,
 ) {
     val needle = query.trim().lowercase()
     val filtered = if (needle.isEmpty()) threads else threads.filter {
@@ -903,8 +934,8 @@ fun V17Messages(
                     Text("“${CaptionDisplay.text(critical.criticalBody)}”", color = Ink, fontFamily = Poppins, fontWeight = FontWeight.Bold, fontSize = 14.sp, modifier = Modifier.padding(top = 10.dp))
                     Text("On-device AI", color = CyanText, fontFamily = Poppins, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
                     Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Box(Modifier.weight(1.4f).height(56.dp).clip(RoundedCornerShape(28.dp)).background(Accent).clickable { onSos(critical) }, contentAlignment = Alignment.Center) {
-                            Text("Send SOS", color = Color.White, fontFamily = Poppins, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        Box(Modifier.weight(1.4f).height(56.dp).clip(RoundedCornerShape(28.dp)).background(Accent).clickable { onUrgent(critical) }, contentAlignment = Alignment.Center) {
+                            Text("Send urgent", color = Color.White, fontFamily = Poppins, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                         }
                         Box(Modifier.weight(1f).height(56.dp).clip(RoundedCornerShape(28.dp)).background(CardWhite).border(1.dp, Color(0xFFF9CFCF), RoundedCornerShape(28.dp)).clickable { onOpen(critical) }, contentAlignment = Alignment.Center) {
                             Text("Open", color = Ink, fontFamily = Poppins, fontWeight = FontWeight.Bold, fontSize = 14.sp)
@@ -923,7 +954,13 @@ fun V17Messages(
                     Row(Modifier.fillMaxWidth().height(70.dp).clickable { onOpen(thread) }.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Avatar(thread.name, 36, true)
                         Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
-                            Text(thread.name, color = Ink, fontFamily = Poppins, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(thread.name, color = Ink, fontFamily = Poppins, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                if (thread.urgent) {
+                                    Spacer(Modifier.width(6.dp))
+                                    UrgentBadge()
+                                }
+                            }
                             Text(thread.snippet, color = if (thread.unread > 0) Ink else InkSoft, fontFamily = Poppins, fontWeight = if (thread.unread > 0) FontWeight.Bold else FontWeight.Normal, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         Column(horizontalAlignment = Alignment.End) {

@@ -149,7 +149,7 @@ class LastSeenBook {
     }
 }
 
-enum class PieceKind { SOS_BYTES, VOICE_BYTES, FILE }
+enum class PieceKind { URGENT_BYTES, TEXT_BYTES, VOICE_BYTES, FILE }
 
 data class RelayPiece(val kind: PieceKind, val id: String)
 
@@ -158,17 +158,32 @@ data class SendPlan(
     val ordered: List<RelayPiece>,
 )
 
-object SosDispatch {
+object PayloadOrder {
     /**
-     * SOS is its own BYTES payload and is sent before any FILE.
-     * In-flight FILE payload ids are cancelled first so the bytes are not queued behind a clip.
+     * Text and urgent messages are BYTES and leave before any FILE.
+     * In-flight FILE payload ids are cancelled so those bytes are not stuck behind a clip.
      */
     fun plan(inFlightFilePayloadIds: List<Long>, pending: List<RelayPiece>): SendPlan {
-        val sos = pending.filter { it.kind == PieceKind.SOS_BYTES }
+        val urgent = pending.filter { it.kind == PieceKind.URGENT_BYTES }
+        val text = pending.filter { it.kind == PieceKind.TEXT_BYTES }
         val voice = pending.filter { it.kind == PieceKind.VOICE_BYTES }
         val files = pending.filter { it.kind == PieceKind.FILE }
-        val cancel = if (sos.isNotEmpty()) inFlightFilePayloadIds else emptyList()
-        return SendPlan(cancel, sos + voice + files)
+        val bytes = urgent + text + voice
+        val cancel = if (bytes.isNotEmpty()) inFlightFilePayloadIds else emptyList()
+        return SendPlan(cancel, bytes + files)
+    }
+
+    /** The transcript BYTES payload is sent before the audio FILE. */
+    fun transcriptFirst(messageId: String): List<RelayPiece> = sequence(messageId, "voice", hasAudio = true)
+
+    fun sequence(messageId: String, messageKind: String, hasAudio: Boolean): List<RelayPiece> {
+        val bytesKind = when {
+            messageKind == "urgent" -> PieceKind.URGENT_BYTES
+            hasAudio -> PieceKind.VOICE_BYTES
+            else -> PieceKind.TEXT_BYTES
+        }
+        val bytes = RelayPiece(bytesKind, messageId)
+        return if (hasAudio) listOf(bytes, RelayPiece(PieceKind.FILE, messageId)) else listOf(bytes)
     }
 }
 

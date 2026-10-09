@@ -38,7 +38,9 @@ import ph.appbuilders.saklolo.contact.VoiceControl
 import ph.appbuilders.saklolo.ask.AskEngine
 import ph.appbuilders.saklolo.ask.AskResult
 import ph.appbuilders.saklolo.ask.AskTurn
+import ph.appbuilders.saklolo.audio.ClipStore
 import ph.appbuilders.saklolo.audio.WavPcm
+import ph.appbuilders.saklolo.contact.Urgent
 import ph.appbuilders.saklolo.group.ConcertGroup
 import ph.appbuilders.saklolo.group.GroupNote
 import ph.appbuilders.saklolo.group.GroupQr
@@ -472,11 +474,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         if (!state.actionable || state.urgency == null) return
         val location = DeviceLocation.lastKnown(getApplication())
         val id = java.util.UUID.randomUUID().toString()
-        val audioPath = lastPcm?.let { samples ->
-            val file = WavPcm.clipFile(runtime.clipsDir, id)
-            WavPcm.write(file, samples)
-            if (file.exists() && file.length() > WavPcm.HEADER_BYTES) file.absolutePath else null
-        }
+        val audioPath = lastPcm?.let { samples -> ClipStore.write(runtime.clipsDir, id, samples) }
         lastPcm = null
         val alert = Alert(
             id = id,
@@ -802,19 +800,17 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
                 val peer = voicePeer
                 val location = DeviceLocation.lastKnown(getApplication())
                 val id = java.util.UUID.randomUUID().toString()
-                val file = WavPcm.clipFile(runtime.clipsDir, id)
-                WavPcm.write(file, pcm)
+                val audioPath = ClipStore.write(runtime.clipsDir, id, pcm)
                 if (session != voiceSession ||
                     VoiceDraft.decide(epoch, voiceEpoch, decision.body) is VoiceDraft.Finish.Discarded
                 ) {
-                    file.delete()
+                    audioPath?.let { File(it).delete() }
                     discardVoiceSession(session)
                     return
                 }
-                val audioPath = if (file.exists() && file.length() > WavPcm.HEADER_BYTES) file.absolutePath else null
                 if (peer != null) {
                     if (session != voiceSession) {
-                        file.delete()
+                        audioPath?.let { File(it).delete() }
                         return
                     }
                     sendDirect(peer, decision.body.take(800), kind = "voice", audioPath = audioPath)
@@ -824,7 +820,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 val group = runtime.groupStore.active() ?: run {
                     sendVoiceWhenReady = false
-                    file.delete()
+                    audioPath?.let { File(it).delete() }
                     return
                 }
                 pendingVoice = GroupNote(
@@ -841,7 +837,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
                 )
                 if (session != voiceSession) {
                     pendingVoice = null
-                    file.delete()
+                    audioPath?.let { File(it).delete() }
                     return
                 }
                 _voice.update { it.copy(recording = false, status = "", transcript = pendingVoice?.body.orEmpty()) }
@@ -1064,30 +1060,12 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         publishCall(emergency = null)
     }
 
-    fun sendCallSos() {
-        val words = _call.value.emergency?.trim().orEmpty().ifBlank {
-            _call.value.captions.lastOrNull { !it.transcribing }?.text.orEmpty()
-        }
-        sendSosText(words)
-    }
-
-    fun sendSosText(words: String) {
-        if (words.isBlank()) return
-        val result = TriageEngine.triage(words)
-        val id = java.util.UUID.randomUUID().toString()
-        val alert = Alert(
-            id = id,
-            transcript = words.take(800),
-            summary = result.summary.take(180),
-            urgency = result.urgency,
-            createdAtMillis = System.currentTimeMillis(),
-            hops = 0,
-            language = _sos.value.language.name,
-        )
-        store.addLocal(alert)
-        store.markDelivered(id, relay.broadcast(alert))
-        runtime.refreshAlerts()
-        _notice.value = "SOS sent"
+    /** Possible-emergency action: an urgent message to this contact, not a broadcast alert. */
+    fun sendUrgent(peerId: String, body: String) {
+        val words = body.trim()
+        if (peerId.isBlank() || words.isEmpty()) return
+        sendDirect(peerId, words.take(800), kind = Urgent.KIND)
+        if (call.peerId == peerId) dismissEmergency()
     }
 
     fun startHold() {
@@ -1150,9 +1128,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
             val body = text.trim()
             if (body.isNotEmpty() && peer.isNotBlank()) {
                 val id = java.util.UUID.randomUUID().toString()
-                val file = WavPcm.clipFile(runtime.clipsDir, id)
-                WavPcm.write(file, pcm)
-                val audioPath = if (file.exists() && file.length() > WavPcm.HEADER_BYTES) file.absolutePath else null
+                val audioPath = ClipStore.write(runtime.clipsDir, id, pcm)
                 val message = DirectMessage(
                     id = id,
                     fromDeviceId = deviceId(),
@@ -1217,6 +1193,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     private var holdElapsed = 0
     private var holdSession = 0
     private var holdStartedAt = 0L
+    private var savedMusicVolume = -1
 
     private fun absorbSignals(messages: List<DirectMessage>) {
         val myId = deviceId()
@@ -1287,12 +1264,14 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
+    @Suppress("UNUSED_PARAMETER")
     private fun routeCallAudio(speaker: Boolean) {
         val audio = getApplication<Application>().getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        audio.mode = AudioManager.MODE_IN_COMMUNICATION
-        audio.isSpeakerphoneOn = speaker
+        audio.mode = AudioManager.MODE_NORMAL
+        audio.isSpeakerphoneOn = true
+        raiseMusic(audio)
         val attrs = AudioAttributes.Builder()
-            .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+            .setUsage(AudioAttributes.USAGE_MEDIA)
             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
             .build()
         val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
@@ -1300,13 +1279,32 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
             .build()
         callFocus = request
         audio.requestAudioFocus(request)
-        noteCall(call.copy(speakerOn = speaker))
+        noteCall(call.copy(speakerOn = true))
+    }
+
+    private fun raiseMusic(audio: AudioManager) {
+        if (savedMusicVolume < 0) {
+            savedMusicVolume = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
+        }
+        val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        val target = (max * 0.85f).toInt().coerceIn(1, max)
+        if (audio.getStreamVolume(AudioManager.STREAM_MUSIC) < target) {
+            runCatching { audio.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0) }
+        }
+    }
+
+    private fun restoreMusic(audio: AudioManager) {
+        if (savedMusicVolume < 0) return
+        val restore = savedMusicVolume
+        savedMusicVolume = -1
+        runCatching { audio.setStreamVolume(AudioManager.STREAM_MUSIC, restore, 0) }
     }
 
     private fun releaseCallAudio() {
         val audio = getApplication<Application>().getSystemService(Context.AUDIO_SERVICE) as AudioManager
         callFocus?.let { audio.abandonAudioFocusRequest(it) }
         callFocus = null
+        restoreMusic(audio)
         audio.isSpeakerphoneOn = false
         audio.mode = AudioManager.MODE_NORMAL
         noteCall(call.copy(playing = false, speakerOn = false))
@@ -1321,7 +1319,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         return try {
             player?.release()
             val attrs = AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                .setUsage(AudioAttributes.USAGE_MEDIA)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                 .build()
             player = MediaPlayer().apply {

@@ -46,6 +46,30 @@ object WavPcm {
         return File(dir, "$safe.wav")
     }
 
+    /** Keep a received WAV as wav. Anything else (including AAC m4a) keeps an m4a name so playback still works. */
+    fun storedClip(dir: File, id: String, source: File): File {
+        val safe = id.replace(Regex("[^A-Za-z0-9._-]"), "_")
+        val ext = if (isWav(source)) "wav" else "m4a"
+        return File(dir, "$safe.$ext")
+    }
+
+    fun isWav(file: File): Boolean {
+        if (!file.exists() || file.length() < 12) return false
+        val header = ByteArray(12)
+        file.inputStream().use { stream ->
+            if (stream.read(header) < 12) return false
+        }
+        val riff = header[0] == 'R'.code.toByte() &&
+            header[1] == 'I'.code.toByte() &&
+            header[2] == 'F'.code.toByte() &&
+            header[3] == 'F'.code.toByte()
+        val wave = header[8] == 'W'.code.toByte() &&
+            header[9] == 'A'.code.toByte() &&
+            header[10] == 'V'.code.toByte() &&
+            header[11] == 'E'.code.toByte()
+        return riff && wave
+    }
+
     /** Peak amplitude in each bucket, scaled to 0.08..1. Empty when the file is not a clip. */
     fun peakBars(file: File, bars: Int = 28): List<Float> {
         if (bars <= 0 || !file.exists() || file.length() <= HEADER_BYTES) return emptyList()

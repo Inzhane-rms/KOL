@@ -51,6 +51,7 @@ data class Conversation(
     val unread: Int,
     val critical: Boolean,
     val criticalBody: String,
+    val urgent: Boolean = false,
 )
 
 interface DirectPersistence {
@@ -132,7 +133,7 @@ object EndpointCard {
 }
 
 object DirectGate {
-    val chatKinds = setOf("text", "voice", "ping", "call_clip")
+    val chatKinds = setOf("text", "voice", "ping", "call_clip", Urgent.KIND)
 
     fun show(message: DirectMessage, myId: String): Boolean =
         message.localOrigin || message.fromDeviceId == myId || message.toDeviceId == myId
@@ -179,6 +180,13 @@ object ResyncPlan {
 object CaptionDisplay {
     /** Speaker line is the transcript itself. This phone does not translate. */
     fun text(transcript: String): String = transcript.trim()
+}
+
+object Urgent {
+    const val KIND = "urgent"
+    const val BADGE = "Urgent"
+
+    fun flagged(kind: String): Boolean = kind == KIND
 }
 
 object Ptt {
@@ -415,6 +423,7 @@ class DirectStore(private val persistence: DirectPersistence) {
                 unread = unread,
                 critical = critical != null,
                 criticalBody = critical?.body.orEmpty(),
+                urgent = msgs.any { Urgent.flagged(it.kind) },
             )
         }.sortedWith(compareByDescending<Conversation> { it.critical }.thenByDescending { it.atMillis })
     }
@@ -426,6 +435,7 @@ class DirectStore(private val persistence: DirectPersistence) {
         "voice" -> "Voice ${message.body}".trim()
         "call_clip" -> "Voice ${message.body}".trim()
         "ping" -> "Ping"
+        Urgent.KIND -> message.body
         else -> message.body
     }
 
@@ -458,7 +468,6 @@ class MeshPhone(val deviceId: String, val name: String) {
     val links = linkedSetOf<MeshPhone>()
     var call = CallState()
     val played = mutableListOf<String>()
-    val sos = mutableListOf<String>()
 
     init {
         store.myId = deviceId

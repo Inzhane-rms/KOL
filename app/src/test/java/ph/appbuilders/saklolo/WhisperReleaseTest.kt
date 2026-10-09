@@ -40,6 +40,7 @@ class WhisperReleaseTest {
                 audio: FloatArray,
                 threads: Int,
                 language: String,
+                prompt: String,
             ): String {
                 order += "transcribe"
                 started.countDown()

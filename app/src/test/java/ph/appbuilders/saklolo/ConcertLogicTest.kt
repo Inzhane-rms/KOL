@@ -16,10 +16,7 @@ import ph.appbuilders.saklolo.group.NoteRelay
 import ph.appbuilders.saklolo.group.VoiceDraft
 import ph.appbuilders.saklolo.group.VoiceSheet
 import ph.appbuilders.saklolo.group.MemoryGroupPersistence
-import ph.appbuilders.saklolo.group.PieceKind
 import ph.appbuilders.saklolo.group.RecordIntent
-import ph.appbuilders.saklolo.group.RelayPiece
-import ph.appbuilders.saklolo.group.SosDispatch
 import ph.appbuilders.saklolo.group.recordIntent
 import ph.appbuilders.saklolo.model.AlertJson
 import ph.appbuilders.saklolo.stt.PcmRecorder
@@ -27,18 +24,7 @@ import ph.appbuilders.saklolo.triage.Urgency
 
 class ConcertLogicTest {
     @Test
-    fun sosBytesPreemptInFlightClipsAndRecordingStopsAtThirtySeconds() {
-        val plan = SosDispatch.plan(
-            inFlightFilePayloadIds = listOf(7L, 8L),
-            pending = listOf(
-                RelayPiece(PieceKind.FILE, "clip"),
-                RelayPiece(PieceKind.SOS_BYTES, "sos"),
-                RelayPiece(PieceKind.VOICE_BYTES, "voice"),
-            ),
-        )
-        assertEquals(listOf(7L, 8L), plan.cancelFilePayloadIds)
-        assertEquals(listOf("sos", "voice", "clip"), plan.ordered.map { it.id })
-        assertEquals(PieceKind.SOS_BYTES, plan.ordered.first().kind)
+    fun recordingStopsAtThirtySeconds() {
         assertEquals(30, ClipGate.MAX_SECONDS)
         assertEquals(30, PcmRecorder.MAX_SECONDS)
         assertFalse(ClipGate.acceptLength(ClipGate.MAX_CLIP_BYTES + 1))

@@ -30,7 +30,7 @@ class V0112BlockerTest {
         val locationOff = ready.copy(locationOn = false)
         assertFalse(ReadyToConnect.shouldStart(locationOff))
         assertEquals(1, ReadyToConnect.requiredMissing(locationOff))
-        assertEquals("Setup needed (1)", ReadyToConnect.statusPill(1, 0))
+        assertEquals("Setup needed", ReadyToConnect.statusPill(1, 0))
         assertTrue(ReadyToConnect.permissionLine(locationOff).contains("location=0"))
 
         val wifiOff = ready.copy(wifiOn = false, microphone = false, camera = false, batteryUnrestricted = false)
@@ -44,7 +44,7 @@ class V0112BlockerTest {
     @Test
     fun checklistShowsOnFirstLaunchWhenRequiredIsMissingAndFromThePill() {
         assertTrue(ReadyToConnect.show(seen = false, requiredMissing = 0, pillTapped = false))
-        assertTrue(ReadyToConnect.show(seen = true, requiredMissing = 2, pillTapped = false))
+        assertFalse(ReadyToConnect.show(seen = true, requiredMissing = 2, pillTapped = false))
         assertTrue(ReadyToConnect.show(seen = true, requiredMissing = 0, pillTapped = true))
         assertFalse(ReadyToConnect.show(seen = true, requiredMissing = 0, pillTapped = false))
 

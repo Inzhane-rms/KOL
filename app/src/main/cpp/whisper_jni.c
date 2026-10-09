@@ -42,8 +42,10 @@ Java_ph_appbuilders_saklolo_stt_WhisperNative_transcribe(
         jlong ptr,
         jfloatArray audio,
         jint threads,
-        jstring language) {
+        jstring language,
+        jstring prompt) {
     (void) clazz;
+    (void) language;
     if (ptr == 0 || audio == NULL) {
         return NULL;
     }
@@ -51,8 +53,10 @@ Java_ph_appbuilders_saklolo_stt_WhisperNative_transcribe(
     struct whisper_context *ctx = (struct whisper_context *) ptr;
     jfloat *samples = (*env)->GetFloatArrayElements(env, audio, NULL);
     const jsize n_samples = (*env)->GetArrayLength(env, audio);
-    const char *lang = language != NULL ? (*env)->GetStringUTFChars(env, language, NULL) : NULL;
+    const char *hint = prompt != NULL ? (*env)->GetStringUTFChars(env, prompt, NULL) : NULL;
 
+    /* Greedy best_of 5. Beam 5 on multilingual base was left off: it multiplies
+       decoder work and was not timed on a Camon 40. Language is always Tagalog. */
     struct whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
     params.print_realtime = false;
     params.print_progress = false;
@@ -67,19 +71,17 @@ Java_ph_appbuilders_saklolo_stt_WhisperNative_transcribe(
     params.suppress_blank = true;
     params.suppress_nst = true;
     params.temperature = 0.0f;
-    if (lang == NULL || lang[0] == '\0' || strcmp(lang, "auto") == 0) {
-        params.language = "auto";
-        params.detect_language = true;
-    } else {
-        params.language = lang;
-        params.detect_language = false;
-    }
+    params.language = "tl";
+    params.detect_language = false;
+    params.greedy.best_of = 5;
+    params.initial_prompt = (hint != NULL && hint[0] != '\0') ? hint : NULL;
+    params.carry_initial_prompt = params.initial_prompt != NULL;
 
-    LOGI("transcribe samples=%d threads=%d lang=%s", (int) n_samples, params.n_threads, params.language);
+    LOGI("transcribe samples=%d threads=%d lang=%s best_of=%d", (int) n_samples, params.n_threads, params.language, params.greedy.best_of);
     const int rc = whisper_full(ctx, params, samples, n_samples);
     (*env)->ReleaseFloatArrayElements(env, audio, samples, JNI_ABORT);
-    if (lang != NULL) {
-        (*env)->ReleaseStringUTFChars(env, language, lang);
+    if (hint != NULL) {
+        (*env)->ReleaseStringUTFChars(env, prompt, hint);
     }
     if (rc != 0) {
         LOGE("whisper_full failed rc=%d", rc);

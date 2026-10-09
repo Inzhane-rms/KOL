@@ -161,8 +161,11 @@ class ContactFlowTest {
         assertEquals("voice", voice.kind)
         assertEquals("Dito ako", voice.body)
 
-        ana.sos += words
-        assertTrue(ana.sos.single().contains("nahimatay"))
+        ana.send(ben, words, kind = ph.appbuilders.saklolo.contact.Urgent.KIND, at = 5_500)
+        val urgent = ben.store.thread(ben.deviceId, ana.deviceId).last()
+        assertEquals(ph.appbuilders.saklolo.contact.Urgent.KIND, urgent.kind)
+        assertTrue(urgent.body.contains("nahimatay"))
+        assertTrue(ben.store.conversations(ben.deviceId, emptyMap()).single { it.peerId == ana.deviceId }.urgent)
 
         val disk = MemoryDirectPersistence()
         val saved = DirectStore(disk)

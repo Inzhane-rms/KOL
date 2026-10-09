@@ -3,12 +3,18 @@ package ph.appbuilders.saklolo.stt
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.AutomaticGainControl
+import android.media.audiofx.NoiseSuppressor
 
 class PcmRecorder {
     private val lock = Any()
     private val samples = ArrayList<Float>(SAMPLE_RATE * 20)
     private var audioRecord: AudioRecord? = null
     private var thread: Thread? = null
+    private var gainControl: AutomaticGainControl? = null
+    private var noiseSuppressor: NoiseSuppressor? = null
+    private var echoCanceler: AcousticEchoCanceler? = null
 
     @Volatile
     var isRunning: Boolean = false
@@ -36,6 +42,7 @@ class PcmRecorder {
         synchronized(lock) { samples.clear() }
         isRunning = true
         audioRecord = recorder
+        enableEffects(recorder.audioSessionId)
         recorder.startRecording()
         thread = Thread({
             val buffer = ShortArray(min)
@@ -80,9 +87,34 @@ class PcmRecorder {
             audioRecord?.stop()
         } catch (_: IllegalStateException) {
         }
+        releaseEffects()
         audioRecord?.release()
         audioRecord = null
         return synchronized(lock) { samples.toFloatArray() }
+    }
+
+    private fun enableEffects(sessionId: Int) {
+        if (AutomaticGainControl.isAvailable()) {
+            gainControl = runCatching { AutomaticGainControl.create(sessionId) }.getOrNull()
+            gainControl?.enabled = true
+        }
+        if (NoiseSuppressor.isAvailable()) {
+            noiseSuppressor = runCatching { NoiseSuppressor.create(sessionId) }.getOrNull()
+            noiseSuppressor?.enabled = true
+        }
+        if (AcousticEchoCanceler.isAvailable()) {
+            echoCanceler = runCatching { AcousticEchoCanceler.create(sessionId) }.getOrNull()
+            echoCanceler?.enabled = true
+        }
+    }
+
+    private fun releaseEffects() {
+        listOf(gainControl, noiseSuppressor, echoCanceler).forEach { effect ->
+            runCatching { effect?.release() }
+        }
+        gainControl = null
+        noiseSuppressor = null
+        echoCanceler = null
     }
 
     companion object {

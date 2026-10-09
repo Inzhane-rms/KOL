@@ -12,5 +12,11 @@ internal object WhisperNative {
     external fun freeContext(contextPtr: Long)
 
     @JvmStatic
-    external fun transcribe(contextPtr: Long, audio: FloatArray, threads: Int, language: String): String?
+    external fun transcribe(
+        contextPtr: Long,
+        audio: FloatArray,
+        threads: Int,
+        language: String,
+        prompt: String,
+    ): String?
 }

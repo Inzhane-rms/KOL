@@ -29,9 +29,9 @@ import ph.appbuilders.saklolo.group.ClipGate
 import ph.appbuilders.saklolo.group.GroupNote
 import ph.appbuilders.saklolo.group.GroupStore
 import ph.appbuilders.saklolo.group.NoteRelay
+import ph.appbuilders.saklolo.group.PayloadOrder
 import ph.appbuilders.saklolo.group.PieceKind
 import ph.appbuilders.saklolo.group.RelayPiece
-import ph.appbuilders.saklolo.group.SosDispatch
 import ph.appbuilders.saklolo.group.toGroupNote
 import ph.appbuilders.saklolo.group.toWire
 import ph.appbuilders.saklolo.model.Alert
@@ -153,9 +153,17 @@ class NearbyRelay(
         enqueue(live = true) {
             val withClip = !message.audioPath.isNullOrBlank()
             Log.i(BLINK, "send type=${message.kind} id=${message.id} endpoints=${peers.size} clips=$withClip")
+            val parked = preemptInFlightClips()
+            val resumed = HashSet<String>()
             for (job in ResyncPlan.live(peers.map { it.endpointId }, message, withClip)) {
                 deliverDirect(job.endpointId, job.messages, job.attachClips)
+                resumeClips(parked.filter { it.endpointId == job.endpointId })
+                resumed += job.endpointId
             }
+            parked.filter { it.endpointId !in resumed }
+                .groupBy { it.endpointId }
+                .values
+                .forEach { resumeClips(it) }
         }
         return peers.size
     }
@@ -266,12 +274,12 @@ class NearbyRelay(
         return delivered
     }
 
-    /** Cancel FILE clips that are still transferring so the SOS BYTES payload is not queued behind them. */
+    /** Cancel FILE clips that are still transferring so text and urgent BYTES are not queued behind them. */
     private fun preemptInFlightClips(): List<OutClip> {
         val inflight = synchronized(clipLock) { outgoingClips.values.toList() }
-        val plan = SosDispatch.plan(
+        val plan = PayloadOrder.plan(
             inflight.map { it.payloadId },
-            listOf(RelayPiece(PieceKind.SOS_BYTES, "sos")),
+            listOf(RelayPiece(PieceKind.TEXT_BYTES, "text")),
         )
         val cancel = plan.cancelFilePayloadIds.toSet()
         val parked = inflight.filter { it.payloadId in cancel }
@@ -328,10 +336,18 @@ class NearbyRelay(
         }
         val targets = endpoints.snapshot(exceptEndpoint)
         if (targets.isEmpty() || prepared.isEmpty()) return 0
+        val parked = preemptInFlightClips()
         var delivered = 0
+        val resumed = HashSet<String>()
         for (peer in targets) {
             if (deliverNotes(peer.endpointId, prepared)) delivered++
+            resumeClips(parked.filter { it.endpointId == peer.endpointId })
+            resumed += peer.endpointId
         }
+        parked.filter { it.endpointId !in resumed }
+            .groupBy { it.endpointId }
+            .values
+            .forEach { resumeClips(it) }
         return delivered
     }
 
@@ -417,13 +433,24 @@ class NearbyRelay(
                 Log.w(BLINK, "skipping oversized direct payload (${bytes.size} bytes)")
                 return
             }
+            val ordered = PayloadOrder.plan(
+                emptyList(),
+                prepared.flatMap { message ->
+                    val hasAudio = files.any { it.ownerId == message.id }
+                    PayloadOrder.sequence(message.id, message.kind, hasAudio)
+                },
+            ).ordered
+            val fileAt = ordered.indexOfFirst { it.kind == PieceKind.FILE }
+            val bytesAt = ordered.indexOfFirst { it.kind != PieceKind.FILE }
+            if (bytesAt == -1) return
+            if (fileAt != -1 && fileAt < bytesAt) return
             val result = runCatching { client.sendPayload(endpointId, Payload.fromBytes(bytes)) }
             Log.d(
                 BLINK,
                 "send type=direct ids=${prepared.joinToString(",") { it.id }} to=$endpointId size=${bytes.size} clips=${files.size} result=${result.isSuccess}",
             )
             if (result.isSuccess) {
-                if (files.isNotEmpty()) sendFiles(endpointId, files, note = false, direct = true)
+                if (fileAt != -1) sendFiles(endpointId, files, note = false, direct = true)
                 sent = true
             }
         }
@@ -606,7 +633,7 @@ class NearbyRelay(
             discardPending(source)
             return false
         }
-        val dest = WavPcm.clipFile(clipsDir, alertId)
+        val dest = WavPcm.storedClip(clipsDir, alertId, source)
         if (!copyClip(source, dest)) return false
         discardPending(source)
         store.attachAudio(alertId, dest.absolutePath)
@@ -622,7 +649,7 @@ class NearbyRelay(
             discardPending(source)
             return false
         }
-        val dest = WavPcm.clipFile(clipsDir, messageId)
+        val dest = WavPcm.storedClip(clipsDir, messageId, source)
         if (!copyClip(source, dest)) return false
         discardPending(source)
         directStore.attachAudio(messageId, dest.absolutePath)
@@ -646,7 +673,7 @@ class NearbyRelay(
             discardPending(source)
             return false
         }
-        val dest = WavPcm.clipFile(clipsDir, noteId)
+        val dest = WavPcm.storedClip(clipsDir, noteId, source)
         if (!copyClip(source, dest)) return false
         discardPending(source)
         groupStore.attachAudio(noteId, dest.absolutePath)

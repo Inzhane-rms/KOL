@@ -49,6 +49,7 @@ import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import ph.appbuilders.saklolo.SakloloViewModel
 import ph.appbuilders.saklolo.contact.CallPhase
+import ph.appbuilders.saklolo.contact.DirectGate
 import ph.appbuilders.saklolo.relay.ReadyToConnect
 import ph.appbuilders.saklolo.relay.RelayService
 import ph.appbuilders.saklolo.relay.SetupFacts
@@ -56,17 +57,14 @@ import ph.appbuilders.saklolo.relay.SetupKey
 import ph.appbuilders.saklolo.relay.SetupProbe
 import ph.appbuilders.saklolo.ui.theme.Ink
 
-private const val CONTACTS = "contacts"
-private const val MESSAGES = "messages"
-private const val ADD = "add"
-private const val FEED = "sos"
-private const val THREAD = "thread"
-private const val CALL = "call"
+private const val CONTACTS = MainNav.CONTACTS
+private const val MESSAGES = MainNav.MESSAGES
+private const val ADD = MainNav.ADD
+private const val THREAD = MainNav.THREAD
+private const val CALL = MainNav.CALL
 
 @Composable
 fun SakloloApp(viewModel: SakloloViewModel) {
-    val sos by viewModel.sos.collectAsStateWithLifecycle()
-    val alerts by viewModel.alerts.collectAsStateWithLifecycle()
     val contacts by viewModel.contacts.collectAsStateWithLifecycle()
     val messages by viewModel.directMessages.collectAsStateWithLifecycle()
     val threads by viewModel.threads.collectAsStateWithLifecycle()
@@ -169,7 +167,7 @@ fun SakloloApp(viewModel: SakloloViewModel) {
     val openRow = contacts.firstOrNull { it.deviceId == peerId }
     val threadMessages = messages.filter { message ->
         val other = if (viewModel.isMine(message)) message.toDeviceId else message.fromDeviceId
-        other == peerId && message.kind in setOf("text", "voice", "ping", "call_clip")
+        other == peerId && message.kind in DirectGate.chatKinds
     }
     val qrPayload = viewModel.myQr()
     val qrImage by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, qrPayload) {
@@ -252,12 +250,7 @@ fun SakloloApp(viewModel: SakloloViewModel) {
     }
 
     V17Scaffold(
-        route = when (route) {
-            MESSAGES -> "messages"
-            ADD -> "add"
-            FEED -> "sos"
-            else -> "contacts"
-        },
+        route = MainNav.barRoute(route),
         unread = unread,
         showTabs = route != CALL,
         notice = notice,
@@ -266,7 +259,6 @@ fun SakloloApp(viewModel: SakloloViewModel) {
         onMessages = { route = MESSAGES },
         onCall = { quickCall = true },
         onAdd = { route = ADD },
-        onSos = { route = FEED },
         overlay = if (quickCall && route != CALL) {
             {
                 V17QuickCall(
@@ -310,7 +302,7 @@ fun SakloloApp(viewModel: SakloloViewModel) {
             CALL -> V17InCall(
                 call = call,
                 inRange = contacts.firstOrNull { it.deviceId == call.peerId }?.inRange == true,
-                onSos = viewModel::sendCallSos,
+                onUrgent = { viewModel.sendUrgent(call.peerId, call.emergency.orEmpty()) },
                 onDismiss = viewModel::dismissEmergency,
                 onHoldStart = { ensureMic { viewModel.startHold() } },
                 onHoldEnd = viewModel::stopHold,
@@ -331,7 +323,7 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                 onQuery = { search = it },
                 now = now,
                 onOpen = { openThread(it.peerId) },
-                onSos = { viewModel.sendSosText(it.criticalBody) },
+                onUrgent = { viewModel.sendUrgent(it.peerId, it.criticalBody) },
             )
             ADD -> V17Add(
                 name = nameDraft,
@@ -344,19 +336,6 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                 onScan = { scanQr() },
                 onShare = { shareCode(context, qrPayload) },
                 onCall = { place(it.deviceId) },
-            )
-            FEED -> V16Sos(
-                sos = sos,
-                alerts = alerts,
-                onHoldStart = { ensureMic { viewModel.startRecording() } },
-                onHoldEnd = { if (sos.recording) viewModel.stopRecording() },
-                onHoldCancel = { if (sos.recording) viewModel.cancelRecording() },
-                onUndo = viewModel::undoCancel,
-                onSendDraft = viewModel::sendDraft,
-                onDiscard = viewModel::discardDraft,
-                onPlay = viewModel::playClip,
-                onRespond = viewModel::markResponding,
-                clipReady = viewModel::clipReady,
             )
             else -> V17Contacts(
                 rows = contacts,

@@ -87,11 +87,16 @@ object ReadyToConnect {
     /** Bluetooth, Location, and Nearby permission. Wi-Fi, name, and notifications are ignored. */
     fun shouldStart(facts: SetupFacts): Boolean = requiredMissing(facts) == 0
 
+    /**
+     * First launch, and again only when the Contacts pill is tapped.
+     * Back or Continue anyway sets [seen] for this session, so missing rows do not reopen it.
+     */
+    @Suppress("UNUSED_PARAMETER")
     fun show(seen: Boolean, requiredMissing: Int, pillTapped: Boolean): Boolean =
-        pillTapped || !seen || requiredMissing > 0
+        pillTapped || !seen
 
     fun statusPill(requiredMissing: Int, inRange: Int): String =
-        if (requiredMissing > 0) "Setup needed ($requiredMissing)" else "Ready · $inRange in range"
+        if (requiredMissing > 0) "Setup needed" else "Ready · $inRange in range"
 
     fun permissionLine(facts: SetupFacts): String =
         "bt=${bit(facts.bluetoothOn)} location=${bit(facts.locationOn)} nearby=${bit(facts.nearbyPermission)} " +
