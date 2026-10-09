@@ -58,6 +58,17 @@ class PcmRecorder {
         return null
     }
 
+    fun recentPeak(): Float = synchronized(lock) {
+        if (samples.isEmpty()) return 0f
+        val start = (samples.size - 800).coerceAtLeast(0)
+        var peak = 0f
+        for (index in start until samples.size) {
+            val sample = kotlin.math.abs(samples[index])
+            if (sample > peak) peak = sample
+        }
+        peak
+    }
+
     fun stop(): FloatArray {
         isRunning = false
         try {

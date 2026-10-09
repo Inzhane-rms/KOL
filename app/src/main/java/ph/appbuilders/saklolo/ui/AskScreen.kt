@@ -64,8 +64,6 @@ fun AskScreen(
     turns: List<AskTurn>,
     onAsk: (String) -> Unit,
     onOpenRecorder: () -> Unit,
-    seed: String? = null,
-    onSeedConsumed: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val bank = remember { loadBank(context) }
@@ -79,12 +77,6 @@ fun AskScreen(
         onAsk(text)
     }
 
-    LaunchedEffect(seed) {
-        val text = questionToAutoSend(seed) ?: return@LaunchedEffect
-        ask(text)
-        onSeedConsumed()
-    }
-
     LaunchedEffect(turns.size) {
         scroll.animateScrollTo(scroll.maxValue)
     }
@@ -95,7 +87,7 @@ fun AskScreen(
             .statusBarsPadding()
             .padding(horizontal = 20.dp)
             .navigationBarsPadding()
-            .padding(bottom = 100.dp),
+            .padding(bottom = 150.dp),
     ) {
         Text("Ask B-LINK", color = Ink, fontSize = 26.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))
         Text("Offline answers from official guides", color = InkSoft, fontSize = 13.sp, modifier = Modifier.padding(bottom = 12.dp))
@@ -136,16 +128,16 @@ private fun SuggestionRow(suggestions: List<ph.appbuilders.saklolo.ask.AskSugges
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         suggestions.forEach { suggestion ->
-            Text(
-                text = suggestion.label,
-                color = Ink,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
+            Box(
                 modifier = Modifier
-                    .softCard(CircleShape)
-                    .clickable { onAsk(suggestion.question) }
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-            )
+                    .height(48.dp)
+                    .softCard(RoundedCornerShape(24.dp))
+                    .clickable { onAsk(chipQuestion(suggestion)) }
+                    .padding(horizontal = 16.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(suggestion.label, color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            }
         }
     }
 }
@@ -160,9 +152,9 @@ private fun AskInput(
         modifier = Modifier
             .padding(top = 12.dp)
             .fillMaxWidth()
-            .height(60.dp)
-            .softCard(RoundedCornerShape(30.dp))
-            .padding(start = 18.dp, end = 8.dp),
+            .height(56.dp)
+            .softCard(RoundedCornerShape(28.dp))
+            .padding(start = 18.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         BasicTextField(
@@ -184,7 +176,7 @@ private fun AskInput(
         Box(
             modifier = Modifier
                 .padding(start = 6.dp)
-                .size(40.dp)
+                .size(48.dp)
                 .clip(CircleShape)
                 .background(Accent)
                 .clickable(onClick = onSend),
@@ -219,7 +211,9 @@ private fun TipCard(result: AskResult.Tip, bank: SafetyBank) {
         title = result.answerTl,
         details = result.answerEn,
         chips = bank.sourceChips(result.sourceCode),
-        footnote = "${bank.disclaimerEn} ${bank.disclaimerTl}",
+        footnote = realSourceLine(bank.sources, result.sourceCode).ifEmpty {
+            "${bank.disclaimerEn} ${bank.disclaimerTl}"
+        },
         fromModel = result.fromModel,
     )
 }
@@ -258,16 +252,16 @@ private fun AnswerCard(
             }
             Text("B-LINK · answer", color = InkSoft, fontSize = 12.sp, modifier = Modifier.padding(start = 8.dp))
         }
-        if (fromModel) {
+        if (showNearestTipLabel(fromModel)) {
             Text(
                 "Pinakamalapit na tip",
                 color = PillAmberText,
-                fontSize = 12.sp,
+                fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(RoundedCornerShape(14.dp))
                     .background(PillAmberBg)
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
             )
         }
         Text("SAGOT SA: $asked", color = Ink, fontSize = 12.sp, fontWeight = FontWeight.Bold)
@@ -309,15 +303,20 @@ private fun EmergencyCard(title: String, details: String, onOpenRecorder: () -> 
         }
         Box(
             modifier = Modifier
-                .size(52.dp)
+                .size(56.dp)
                 .clip(CircleShape)
                 .background(Brush.radialGradient(listOf(Color(0xFFFF4B4B), Accent, Color(0xFFB5161C))))
                 .clickable(onClick = onOpenRecorder),
             contentAlignment = Alignment.Center,
         ) {
-            Text("SOS", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            SignalMark()
         }
     }
+}
+
+@Composable
+private fun SignalMark() {
+    Text("((•))", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
 }
 
 private fun loadBank(context: Context): SafetyBank =

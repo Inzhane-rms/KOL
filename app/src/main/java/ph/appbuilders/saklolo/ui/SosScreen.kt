@@ -1,37 +1,33 @@
 package ph.appbuilders.saklolo.ui
 
-import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.DirectionsRun
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -39,28 +35,22 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ph.appbuilders.saklolo.SosUiState
-import ph.appbuilders.saklolo.ask.AskEngine
-import ph.appbuilders.saklolo.ask.AskSuggestion
-import ph.appbuilders.saklolo.ask.SafetyBank
 import ph.appbuilders.saklolo.model.Alert
 import ph.appbuilders.saklolo.relay.NearbyPeer
 import ph.appbuilders.saklolo.ui.theme.Accent
-import ph.appbuilders.saklolo.ui.theme.Amber
 import ph.appbuilders.saklolo.ui.theme.GreenText
+import ph.appbuilders.saklolo.ui.theme.Hairline
 import ph.appbuilders.saklolo.ui.theme.Ink
 import ph.appbuilders.saklolo.ui.theme.InkSoft
 import ph.appbuilders.saklolo.ui.theme.LightRed
-import ph.appbuilders.saklolo.ui.theme.Page
 import ph.appbuilders.saklolo.ui.theme.StatusGreen
+import kotlin.math.sin
 
 @Composable
 fun SosScreen(
@@ -72,101 +62,113 @@ fun SosScreen(
     clipReady: (Alert) -> Boolean,
     onHoldStart: () -> Unit,
     onHoldEnd: () -> Unit,
+    onHoldCancel: () -> Unit,
+    onUndo: () -> Unit,
     onTranscript: (String) -> Unit,
     onSend: () -> Unit,
     onDiscard: () -> Unit,
     onPlay: (Alert) -> Unit,
     onOpenSettings: () -> Unit,
-    onSeeAll: () -> Unit,
-    onTopic: (String) -> Unit,
     onOpenAlerts: () -> Unit,
     micBlocked: Boolean = false,
     micGranted: Boolean = true,
     locationWarning: String? = null,
     onOpenAppSettings: () -> Unit = {},
 ) {
-    val context = LocalContext.current
-    val topics = androidx.compose.runtime.remember { AskEngine.recorderTopics(loadRecorderBank(context)) }
+    val scroll = rememberScrollState()
+    LaunchedEffect(state.actionable, state.canUndo) {
+        if (state.actionable || state.canUndo) scroll.animateScrollTo(scroll.maxValue)
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scroll)
             .statusBarsPadding()
             .padding(horizontal = 20.dp)
             .navigationBarsPadding()
-            .padding(bottom = 100.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(bottom = 116.dp + 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        StatusPills(state.gemmaLoading, peers.size, location, onOpenSettings)
+        StatusPills(state.gemmaLoading, peers.size, location)
         locationWarning?.let { detail ->
+            Spacer(Modifier.height(12.dp))
             LocationWarningCard(detail, onOpenAppSettings)
         }
-        Text(
-            "Emergency help needed?",
-            color = Ink,
-            fontSize = 26.sp,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-        )
-        Text(
-            "Hold the button and speak in Tagalog",
-            color = InkSoft,
-            fontSize = 13.sp,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        recordStatusLine(state)?.let { line ->
-            Text(line, color = InkSoft, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
-        }
-        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            SosOrb(
-                recording = state.recording,
-                elapsedSec = state.elapsedSec,
-                enabled = state.modelReady,
-                onHoldStart = onHoldStart,
-                onHoldEnd = onHoldEnd,
-                dimmed = !micGranted,
-            )
-        }
-        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        Spacer(Modifier.height(12.dp))
+        if (state.recording) {
+            RecordingHeading()
+            Spacer(Modifier.height(12.dp))
+            LevelBars(state.micLevel)
+        } else {
             Text(
-                holdLabel(state.recording, state.elapsedSec),
+                "Emergency help\nneeded?",
+                color = Ink,
+                fontSize = 26.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                lineHeight = 32.sp,
+            )
+            Text(
+                "Speak in Tagalog or Bisaya",
+                color = InkSoft,
+                fontSize = 14.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            Spacer(Modifier.height(12.dp))
+            HoldSteps()
+        }
+        state.error?.let { error ->
+            Text(error, color = InkSoft, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp))
+        }
+        Spacer(Modifier.height(12.dp))
+        SosOrb(
+            recording = state.recording,
+            elapsedSec = state.elapsedSec,
+            enabled = state.modelReady,
+            onHoldStart = onHoldStart,
+            onHoldEnd = onHoldEnd,
+            onHoldCancel = onHoldCancel,
+            dimmed = !micGranted,
+        )
+        Spacer(Modifier.height(12.dp))
+        if (state.canUndo) {
+            UndoCard(onUndo)
+            Spacer(Modifier.height(12.dp))
+        }
+        if (state.recording) {
+            Text(
+                holdLabel(true, state.elapsedSec),
                 color = Color.White,
-                fontSize = 12.sp,
+                fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier
-                    .clip(RoundedCornerShape(15.dp))
+                    .clip(RoundedCornerShape(16.dp))
                     .background(Ink)
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+            Spacer(Modifier.height(12.dp))
+            HoldHintCard()
+        } else {
+            Text(
+                "Hold to record",
+                color = Ink,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.pointerInput(Unit) {
+                    detectTapGestures(onLongPress = { onOpenSettings() })
+                },
             )
         }
         if (micBlocked) {
+            Spacer(Modifier.height(12.dp))
             MicBlockedCard(onOpenAppSettings)
         }
-        if (state.actionable && state.urgency != null) {
+        if (state.actionable && state.urgency != null && !state.recording) {
+            Spacer(Modifier.height(12.dp))
             DraftCard(state, onTranscript, onSend, onDiscard)
-        }
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("Not sure what to do?", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            Text(
-                "See all",
-                color = Accent,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.clickable(onClick = onSeeAll),
-            )
-        }
-        Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            topics.forEachIndexed { index, topic ->
-                val (icon, tint) = topicStyle(index)
-                TopicCard(topic, icon, tint) { onTopic(topic.question) }
-            }
-        }
-        if (!state.actionable && lastAlert != null) {
+        } else if (!state.recording && lastAlert != null) {
+            Spacer(Modifier.height(12.dp))
             LastAlertCard(
                 alert = lastAlert,
                 localOrigin = lastAlertLocal,
@@ -174,38 +176,150 @@ fun SosScreen(
                 onOpen = { if (clipReady(lastAlert)) onPlay(lastAlert) else onOpenAlerts() },
             )
         }
+        Spacer(Modifier.height(12.dp))
     }
 }
 
-private fun topicStyle(index: Int): Pair<ImageVector, Color> = when (index) {
-    0 -> Icons.Filled.WaterDrop to StatusGreen
-    1 -> Icons.Filled.Add to Accent
-    else -> Icons.Filled.DirectionsRun to Amber
+@Composable
+private fun RecordingHeading() {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(8.dp).clip(CircleShape).background(Accent))
+        Text(
+            "  Recording…",
+            color = Ink,
+            fontSize = 26.sp,
+            fontWeight = FontWeight.Bold,
+        )
+    }
+    Text(
+        "Speak now",
+        color = Ink,
+        fontSize = 26.sp,
+        fontWeight = FontWeight.Bold,
+        textAlign = TextAlign.Center,
+    )
+    Text(
+        "Say where you are and what you need",
+        color = InkSoft,
+        fontSize = 14.sp,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.padding(top = 4.dp),
+    )
 }
 
 @Composable
-private fun StatusPills(gemmaLoading: Boolean, peers: Int, location: Pair<Double, Double>?, onOpenSettings: () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+private fun HoldSteps() {
+    val labels = listOf("1" to "Hold", "2" to "Speak", "3" to "Release")
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        labels.forEachIndexed { index, (number, label) ->
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(
+                    Modifier.size(24.dp).clip(CircleShape).background(Color.White),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(number, color = Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+                Text(label, color = InkSoft, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+            }
+            if (index < labels.lastIndex) {
+                Box(
+                    Modifier
+                        .padding(bottom = 16.dp)
+                        .width(28.dp)
+                        .height(2.dp)
+                        .background(Color(0xFFC9CDD6)),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LevelBars(level: Float) {
+    val loud = level.coerceIn(0f, 1f)
+    Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
+        repeat(20) { index ->
+            val shape = 0.35f + 0.65f * sin(Math.PI * (index + 1) / 21.0).toFloat()
+            val window = if (index < 14) 1f else 0.28f
+            val height = 8f + 30f * shape * loud.coerceAtLeast(0.2f) * window
+            Box(
+                Modifier
+                    .width(5.dp)
+                    .height(height.dp)
+                    .clip(RoundedCornerShape(2.5.dp))
+                    .background(if (index < 14) Accent else Color(0xFFC9CDD6)),
+            )
+        }
+    }
+}
+
+@Composable
+private fun UndoCard(onUndo: () -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().softCard(RoundedCornerShape(24.dp)).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("Cancelled · Undo", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+                .clip(RoundedCornerShape(28.dp))
+                .background(Ink)
+                .clickable(onClick = onUndo),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("Undo", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+private fun HoldHintCard() {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(72.dp)
+            .softCard(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("↑", color = Accent, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text("Release to send", color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        }
+        Box(Modifier.width(1.5.dp).height(40.dp).background(Hairline))
+        Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("←", color = InkSoft, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text("Slide away to cancel", color = InkSoft, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+private fun StatusPills(gemmaLoading: Boolean, peers: Int, location: Pair<Double, Double>?) {
+    Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(
             modifier = Modifier
+                .weight(1f)
                 .height(40.dp)
                 .softCard(CircleShape)
-                .semantics { contentDescription = "Offline status. Long-press for demo settings" }
-                .pointerInput(Unit) { detectTapGestures(onLongPress = { onOpenSettings() }) }
                 .padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(Modifier.size(8.dp).clip(CircleShape).background(StatusGreen))
+            Box(Modifier.size(12.dp).clip(CircleShape).background(StatusGreen))
             Text(
                 statusPill(gemmaLoading, peers),
                 color = Ink,
-                fontSize = 12.sp,
+                fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(start = 6.dp),
+                maxLines = 1,
+                modifier = Modifier.padding(start = 8.dp),
             )
         }
         Row(
             modifier = Modifier
+                .weight(1f)
                 .height(40.dp)
                 .softCard(CircleShape)
                 .padding(horizontal = 12.dp),
@@ -215,8 +329,9 @@ private fun StatusPills(gemmaLoading: Boolean, peers: Int, location: Pair<Double
             Text(
                 locationPill(location?.first, location?.second),
                 color = Ink,
-                fontSize = 12.sp,
+                fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
+                maxLines = 1,
                 modifier = Modifier.padding(start = 4.dp),
             )
         }
@@ -266,38 +381,17 @@ private fun PermissionCard(
                 Text(detail, color = InkSoft, fontSize = 13.sp)
             }
         }
-        Text(
-            "Buksan ang Settings",
-            color = Color.White,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier
-                .clip(RoundedCornerShape(20.dp))
+        Box(
+            Modifier
+                .height(48.dp)
+                .clip(RoundedCornerShape(24.dp))
                 .background(Ink)
                 .clickable(onClick = onOpenAppSettings)
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-        )
-    }
-}
-
-@Composable
-private fun TopicCard(topic: AskSuggestion, icon: ImageVector, tint: Color, onClick: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .width(150.dp)
-            .height(92.dp)
-            .softCard()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Box(
-            Modifier.size(40.dp).clip(CircleShape).background(tint.copy(alpha = 0.14f)),
+                .padding(horizontal = 16.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
+            Text("Buksan ang Settings", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
         }
-        Text(topic.label, color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
     }
 }
 
@@ -308,15 +402,17 @@ private fun LastAlertCard(alert: Alert, localOrigin: Boolean, canPlay: Boolean, 
         modifier = Modifier
             .fillMaxWidth()
             .height(72.dp)
-            .softCard()
-            .padding(horizontal = 12.dp),
+            .softCard(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(36.dp).clip(CircleShape).background(Accent), contentAlignment = Alignment.Center) {
-            Text("!", color = Color.White, fontWeight = FontWeight.Bold)
+        Box(
+            Modifier.padding(start = 16.dp).size(40.dp).clip(CircleShape).background(Accent),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("((•))", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
         }
-        Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
-            Text(alert.summary, color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+            Text(alert.summary, color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
             StepRow(progress)
         }
         RoundArrow(
@@ -324,7 +420,9 @@ private fun LastAlertCard(alert: Alert, localOrigin: Boolean, canPlay: Boolean, 
             tint = Accent,
             description = if (canPlay) "Play voice clip" else "Open alerts",
             onClick = onOpen,
+            diameter = 48.dp,
         )
+        Spacer(Modifier.width(12.dp))
     }
 }
 
@@ -345,7 +443,7 @@ private fun StepRow(progress: AlertProgress) {
                     .clip(CircleShape)
                     .background(if (done) GreenText else InkSoft.copy(alpha = 0.35f)),
             )
-            Text(label, color = color, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(end = 8.dp))
+            Text(label, color = color, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(end = 8.dp))
         }
     }
 }
@@ -357,7 +455,10 @@ private fun DraftCard(
     onSend: () -> Unit,
     onDiscard: () -> Unit,
 ) {
-    Column(Modifier.flatCard(Color.White).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(
+        Modifier.fillMaxWidth().softCard(RoundedCornerShape(28.dp)).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         Text("REVIEW · ${state.urgency!!.label}", color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold)
         Text(state.summary, color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Text(sourceLabel(state.summarySource), color = if (state.summarySource == "AI") GreenText else InkSoft, fontSize = 13.sp)
@@ -366,29 +467,28 @@ private fun DraftCard(
             onValueChange = onTranscript,
             textStyle = TextStyle(color = Ink, fontSize = 16.sp),
             cursorBrush = SolidColor(Ink),
-            modifier = Modifier.fillMaxWidth().background(Page, RoundedCornerShape(16.dp)).padding(12.dp),
+            modifier = Modifier.fillMaxWidth().background(Color(0xFFF4F5F8), RoundedCornerShape(16.dp)).padding(12.dp),
         )
-        Text(state.status, color = InkSoft, fontSize = 14.sp)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(onClick = onSend, modifier = Modifier.height(48.dp)) {
-                Text("Send alert", color = Accent, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            }
-            TextButton(onClick = onDiscard, modifier = Modifier.height(48.dp)) {
-                Text("Discard", color = InkSoft, fontSize = 16.sp)
-            }
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+                .clip(RoundedCornerShape(28.dp))
+                .background(Accent)
+                .clickable(onClick = onSend),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("Send alert", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        }
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .clip(RoundedCornerShape(24.dp))
+                .clickable(onClick = onDiscard),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("Discard", color = InkSoft, fontSize = 15.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
-
-private fun recordStatusLine(state: SosUiState): String? {
-    state.error?.let { return it }
-    val idle = "Hold the button and speak. Tagalog, Bisaya, or English."
-    if (state.status != idle && !state.recording) return state.status
-    if (!state.modelReady) return state.modelStatus
-    return null
-}
-
-private fun loadRecorderBank(context: Context): SafetyBank =
-    context.assets.open("ask/ask_blink_qa.json").bufferedReader().use { reader ->
-        AskEngine.parse(reader.readText())
-    }

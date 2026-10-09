@@ -140,7 +140,6 @@ fun SakloloApp(viewModel: SakloloViewModel) {
     }
 
     val location by viewModel.location.collectAsStateWithLifecycle()
-    var askSeed by remember { mutableStateOf<String?>(null) }
     val localAlerts = alerts.filter { viewModel.isLocalOrigin(it.id) }
     val lastAlert = sos.sentAlertId?.let { id -> localAlerts.firstOrNull { it.id == id } }
         ?: localAlerts.maxByOrNull { it.createdAtMillis }
@@ -152,8 +151,6 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                 turns = askTurns,
                 onAsk = viewModel::submitAsk,
                 onOpenRecorder = { route = RECORD },
-                seed = askSeed,
-                onSeedConsumed = { askSeed = null },
             )
         } else if (route == RECORD) {
             SosScreen(
@@ -176,16 +173,13 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                     }
                 },
                 onHoldEnd = { if (sos.recording) viewModel.stopRecording() },
+                onHoldCancel = { if (sos.recording) viewModel.cancelRecording() },
+                onUndo = viewModel::undoCancel,
                 onTranscript = viewModel::onTranscriptChange,
                 onSend = viewModel::sendDraft,
                 onDiscard = viewModel::discardDraft,
                 onPlay = viewModel::playClip,
                 onOpenSettings = { settingsOpen = true },
-                onSeeAll = { route = ASK },
-                onTopic = { question ->
-                    askSeed = question
-                    route = ASK
-                },
                 onOpenAlerts = { route = FEED },
                 micBlocked = micBlocked,
                 micGranted = micGranted,
@@ -209,7 +203,6 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                 onPlay = viewModel::playClip,
                 onDismissNotice = viewModel::clearNotice,
                 onMarkResponding = viewModel::markResponding,
-                onOpenRecorder = { route = RECORD },
             )
         }
         BottomSwitcher(

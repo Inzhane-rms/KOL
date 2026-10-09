@@ -20,8 +20,10 @@ import ph.appbuilders.saklolo.relay.relayStartFailureMessage
 import ph.appbuilders.saklolo.relay.runRelayServiceStart
 import ph.appbuilders.saklolo.stt.SpeechLanguage
 import ph.appbuilders.saklolo.triage.SummaryRefine
+import ph.appbuilders.saklolo.ui.SosHoldEnd
 import ph.appbuilders.saklolo.ui.questionToAutoSend
-import ph.appbuilders.saklolo.ui.shouldEndSosHold
+import ph.appbuilders.saklolo.ui.sosHoldEnd
+import ph.appbuilders.saklolo.ui.undoExpired
 
 class ReviewFixesTest {
     @Test
@@ -244,13 +246,37 @@ class ReviewFixesTest {
     }
 
     @Test
-    fun slidingOffTheSosButtonDoesNotEndTheHold() {
-        assertFalse(shouldEndSosHold(pointerPressed = true, outOfBounds = false, cancelled = false))
-        assertFalse(shouldEndSosHold(pointerPressed = true, outOfBounds = true, cancelled = false))
-        assertTrue(shouldEndSosHold(pointerPressed = false, outOfBounds = false, cancelled = false))
-        assertTrue(shouldEndSosHold(pointerPressed = false, outOfBounds = true, cancelled = false))
-        assertTrue(shouldEndSosHold(pointerPressed = true, outOfBounds = true, cancelled = true))
+    fun cancelStartsAt64DpPastTheButton() {
+        assertEquals(SosHoldEnd.Continue, hold(pressed = true, pastPx = 63.9f, elapsedMs = 0))
+        assertEquals(SosHoldEnd.Cancel, hold(pressed = true, pastPx = 64f, elapsedMs = 0))
+        assertEquals(SosHoldEnd.Cancel, hold(pressed = false, pastPx = 64f, elapsedMs = 2_999))
+        assertEquals(SosHoldEnd.Release, hold(pressed = false, pastPx = 63.9f, elapsedMs = 1_000))
+        assertEquals(SosHoldEnd.Cancel, hold(pressed = true, pastPx = 0f, elapsedMs = 0, cancelled = true))
     }
+
+    @Test
+    fun releaseAfterThreeSecondsSendsAnywhere() {
+        assertEquals(SosHoldEnd.Continue, hold(pressed = true, pastPx = 200f, elapsedMs = 3_000))
+        assertEquals(SosHoldEnd.Release, hold(pressed = false, pastPx = 200f, elapsedMs = 3_000))
+        assertEquals(SosHoldEnd.Release, hold(pressed = false, pastPx = 0f, elapsedMs = 3_000))
+        assertEquals(SosHoldEnd.Cancel, hold(pressed = true, pastPx = 64f, elapsedMs = 2_999))
+    }
+
+    @Test
+    fun undoExpiresAfterFiveSeconds() {
+        assertFalse(undoExpired(4_999))
+        assertTrue(undoExpired(5_000))
+        assertTrue(undoExpired(5_001))
+    }
+
+    private fun hold(pressed: Boolean, pastPx: Float, elapsedMs: Long, cancelled: Boolean = false): SosHoldEnd =
+        sosHoldEnd(
+            pointerPressed = pressed,
+            distancePastEdgePx = pastPx,
+            cancelSlopPx = 64f,
+            elapsedMs = elapsedMs,
+            cancelled = cancelled,
+        )
 
     @Test
     fun topicSeedIsSentRatherThanLeftInTheDraft() {
