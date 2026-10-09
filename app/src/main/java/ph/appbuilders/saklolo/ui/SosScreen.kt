@@ -4,10 +4,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -23,17 +23,23 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import ph.appbuilders.saklolo.SosUiState
 import ph.appbuilders.saklolo.model.Alert
 import ph.appbuilders.saklolo.relay.NearbyPeer
+import ph.appbuilders.saklolo.ui.theme.ForestMid
 import ph.appbuilders.saklolo.ui.theme.Ink
 import ph.appbuilders.saklolo.ui.theme.InkSoft
+import ph.appbuilders.saklolo.ui.theme.MintWash
+import ph.appbuilders.saklolo.ui.theme.Page
 
 @Composable
 fun SosScreen(
@@ -48,98 +54,91 @@ fun SosScreen(
     onDiscard: () -> Unit,
     onPlay: (Alert) -> Unit,
 ) {
+    var tipIndex by remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(6_000)
+            tipIndex = (tipIndex + 1) % preparednessTips.size
+        }
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(horizontal = 16.dp)
+            .navigationBarsPadding()
+            .padding(bottom = 96.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        NearbyCard(peers)
-        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-            SosOrb(
-                recording = state.recording,
-                elapsedSec = state.elapsedSec,
-                enabled = state.modelReady,
-                onHoldStart = onHoldStart,
-                onHoldEnd = onHoldEnd,
-            )
-            Text(
-                text = "Speak in Tagalog or Bisaya · works offline",
-                color = InkSoft,
-                fontSize = 14.sp,
-                modifier = Modifier
-                    .glass(20.dp)
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = if (state.recording) "Release to send it through" else "HOLD TO RECORD",
-                color = Ink,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier
-                    .glass(20.dp)
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = state.modelStatus,
-                color = InkSoft,
-                fontSize = 14.sp,
-                modifier = Modifier
-                    .glass(20.dp)
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-            )
-            if (state.gemmaLoading) {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text = "AI loading…",
-                    color = InkSoft,
-                    fontSize = 13.sp,
-                    modifier = Modifier
-                        .glass(20.dp)
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                )
-            }
-        }
+        HeroCard(state, peers.size, onHoldStart, onHoldEnd)
         if (state.actionable && state.urgency != null) {
             DraftCard(state, onTranscript, onSend, onDiscard)
         } else if (lastAlert != null) {
             LastAlertCard(lastAlert, clipReady(lastAlert), onPlay)
         }
-        state.error?.let { message ->
-            Text(
-                text = message,
-                color = Ink,
-                fontSize = 16.sp,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .glass(20.dp)
-                    .padding(16.dp),
-            )
-        }
-        TipsCard()
-        Spacer(Modifier.height(8.dp))
+        TipsCard(tipIndex) { tipIndex = (tipIndex + 1) % preparednessTips.size }
+        NearbyCard(peers)
+    }
+}
+
+@Composable
+private fun HeroCard(
+    state: SosUiState,
+    peerCount: Int,
+    onHoldStart: () -> Unit,
+    onHoldEnd: () -> Unit,
+) {
+    val action = if (state.recording) "RELEASE TO SEND" else "HOLD TO RECORD"
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(250.dp)
+            .clip(RoundedCornerShape(28.dp))
+            .background(ForestMid),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        SosOrb(
+            recording = state.recording,
+            elapsedSec = state.elapsedSec,
+            enabled = state.modelReady,
+            onHoldStart = onHoldStart,
+            onHoldEnd = onHoldEnd,
+        )
+        Text(
+            text = "$action · ${phonesNearby(peerCount)}",
+            color = MintWash,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = 16.dp),
+        )
     }
 }
 
 @Composable
 private fun NearbyCard(peers: List<NearbyPeer>) {
-    Column(Modifier.fillMaxWidth().glass().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text("NEARBY PHONES", color = InkSoft, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        if (peers.isEmpty()) {
-            Text("No phones connected yet", color = Ink, fontSize = 18.sp)
-        } else {
-            peers.forEach { peer ->
-                Text(
-                    text = "${peer.name} · connected · ${formatWhen(peer.connectedAtMillis)}",
-                    color = Ink,
-                    fontSize = 18.sp,
-                )
-            }
-        }
+    val title = when {
+        peers.isEmpty() -> "No phones connected yet"
+        else -> "Nearby: ${peers.first().name} · connected"
     }
+    val details = when {
+        peers.isEmpty() -> "Waiting for a B-LINK phone"
+        peers.size == 1 -> formatWhen(peers.first().connectedAtMillis)
+        else -> peers.drop(1).joinToString(" · ") { "${it.name} · connected" }
+    }
+    InfoCard(
+        background = Color.White,
+        label = "NEARBY",
+        title = title,
+        details = details,
+        ink = Ink,
+        detailsColor = InkSoft,
+        arrowBackground = ForestMid,
+        arrowTint = Color.White,
+        arrowDescription = null,
+        onArrow = null,
+    )
 }
 
 @Composable
@@ -149,30 +148,35 @@ private fun DraftCard(
     onSend: () -> Unit,
     onDiscard: () -> Unit,
 ) {
-    Column(Modifier.fillMaxWidth().glass().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("REVIEW", color = InkSoft, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            UrgencyChip(state.urgency!!)
-            SourcePill(state.summarySource)
-        }
-        Text(state.summary, color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+    Column(
+        Modifier.flatCard(Color.White).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            "REVIEW · ${state.urgency!!.label}",
+            color = Ink,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        Text(state.summary, color = Ink, fontSize = 21.sp, fontWeight = FontWeight.Bold)
+        Text(sourceLabel(state.summarySource), color = InkSoft, fontSize = 14.sp)
         BasicTextField(
             value = state.transcript,
             onValueChange = onTranscript,
-            textStyle = androidx.compose.ui.text.TextStyle(color = Ink, fontSize = 18.sp),
+            textStyle = TextStyle(color = Ink, fontSize = 16.sp),
             cursorBrush = SolidColor(Ink),
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(0xFFF3F7F5), RoundedCornerShape(12.dp))
+                .background(Page, RoundedCornerShape(16.dp))
                 .padding(12.dp),
         )
         Text(state.status, color = InkSoft, fontSize = 14.sp)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(onClick = onSend, modifier = Modifier.height(56.dp)) {
-                Text("Send alert", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            TextButton(onClick = onSend, modifier = Modifier.height(48.dp)) {
+                Text("Send alert", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold)
             }
-            TextButton(onClick = onDiscard, modifier = Modifier.height(56.dp)) {
-                Text("Discard", color = InkSoft, fontSize = 18.sp)
+            TextButton(onClick = onDiscard, modifier = Modifier.height(48.dp)) {
+                Text("Discard", color = InkSoft, fontSize = 16.sp)
             }
         }
     }
@@ -180,43 +184,34 @@ private fun DraftCard(
 
 @Composable
 private fun LastAlertCard(alert: Alert, canPlay: Boolean, onPlay: (Alert) -> Unit) {
-    Column(Modifier.fillMaxWidth().glass().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("LAST ALERT", color = InkSoft, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            UrgencyChip(alert.urgency)
-            SourcePill(alert.summarySource)
-            if (canPlay) {
-                Spacer(Modifier.weight(1f))
-                PlayButton(onClick = { onPlay(alert) })
-            }
-        }
-        Text(alert.summary, color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        Text(
-            text = "${formatDelivered(alert.deliveredCount)} · ${formatGps(alert.lat, alert.lon)}",
-            color = InkSoft,
-            fontSize = 14.sp,
-        )
-    }
+    InfoCard(
+        background = Color.White,
+        label = "LAST ALERT · ${alert.urgency.label}",
+        title = alert.summary,
+        details = "${formatDelivered(alert.deliveredCount)} · ${formatHops(alert.hops)} · ${sourceLabel(alert.summarySource)}",
+        ink = Ink,
+        detailsColor = InkSoft,
+        arrowBackground = ForestMid,
+        arrowTint = Color.White,
+        arrowDescription = if (canPlay) "Play voice clip" else null,
+        onArrow = if (canPlay) ({ onPlay(alert) }) else null,
+    )
 }
 
 @Composable
-private fun TipsCard() {
-    var index by remember { mutableIntStateOf(0) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(6_000)
-            index = (index + 1) % preparednessTips.size
-        }
-    }
+private fun TipsCard(index: Int, onNext: () -> Unit) {
     val tip = preparednessTips[index]
-    Column(Modifier.fillMaxWidth().glass().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(
-            "TIP ${index + 1} OF ${preparednessTips.size}",
-            color = InkSoft,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-        )
-        Text(tip.tagalog, color = Ink, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-        Text(tip.english, color = InkSoft, fontSize = 16.sp)
-    }
+    InfoCard(
+        background = MintWash,
+        label = "TIP ${index + 1} OF ${preparednessTips.size}",
+        title = tip.tagalog,
+        details = tip.english,
+        ink = Ink,
+        detailsColor = InkSoft,
+        arrowBackground = Color.White,
+        arrowTint = Ink,
+        arrowDescription = "Next tip",
+        onArrow = onNext,
+    )
 }
+

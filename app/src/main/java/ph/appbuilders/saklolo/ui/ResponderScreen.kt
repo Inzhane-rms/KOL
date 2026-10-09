@@ -2,24 +2,19 @@ package ph.appbuilders.saklolo.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.IntrinsicSize
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -35,10 +30,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ph.appbuilders.saklolo.model.Alert
+import ph.appbuilders.saklolo.triage.Urgency
 import ph.appbuilders.saklolo.ui.theme.Ink
-import ph.appbuilders.saklolo.ui.theme.InkSoft
-import ph.appbuilders.saklolo.ui.theme.SafeGreen
-import ph.appbuilders.saklolo.ui.theme.stripe
+import ph.appbuilders.saklolo.ui.theme.cardFill
+import ph.appbuilders.saklolo.ui.theme.onCard
+
+private enum class FeedFilter { ALL, CRITICAL, HELP }
 
 @Composable
 fun ResponderScreen(
@@ -51,41 +48,58 @@ fun ResponderScreen(
     onPlay: (Alert) -> Unit,
     onDismissNotice: () -> Unit,
 ) {
+    var filterName by rememberSaveable { mutableStateOf(FeedFilter.ALL.name) }
+    val filter = runCatching { FeedFilter.valueOf(filterName) }.getOrDefault(FeedFilter.ALL)
+    val shown = when (filter) {
+        FeedFilter.ALL -> alerts
+        FeedFilter.CRITICAL -> alerts.filter { it.urgency == Urgency.CRITICAL }
+        FeedFilter.HELP -> alerts.filter { it.urgency == Urgency.NEEDS_HELP }
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(horizontal = 16.dp)
+            .navigationBarsPadding()
+            .padding(bottom = 96.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Column(Modifier.fillMaxWidth().glass().padding(16.dp)) {
-            Text(formatCounts(alerts), color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-            Text("Sorted by urgency, then newest", color = InkSoft, fontSize = 14.sp)
-            TextButton(onClick = onScan, modifier = Modifier.height(56.dp)) {
-                Text("Scan QR", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            FilterChip("All · ${alerts.size}", filter == FeedFilter.ALL) { filterName = FeedFilter.ALL.name }
+            FilterChip("Critical", filter == FeedFilter.CRITICAL) { filterName = FeedFilter.CRITICAL.name }
+            FilterChip("Needs help", filter == FeedFilter.HELP) { filterName = FeedFilter.HELP.name }
+            FilterChip("Scan QR", selected = false, onClick = onScan)
         }
         notice?.let { message ->
             Text(
                 text = message,
                 color = Ink,
-                fontSize = 16.sp,
+                fontSize = 14.sp,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .glass(20.dp)
-                    .padding(16.dp)
-                    .clickable(onClick = onDismissNotice),
+                    .flatCard(Color.White)
+                    .clickable(onClick = onDismissNotice)
+                    .padding(16.dp),
             )
         }
-        if (alerts.isEmpty()) {
+        if (shown.isEmpty()) {
             Text(
-                text = "No alerts on this phone yet. Record an SOS, or wait for a nearby phone.",
+                text = if (alerts.isEmpty()) {
+                    "No alerts on this phone yet. Record an SOS, or wait for a nearby phone."
+                } else {
+                    "No alerts in this filter."
+                },
                 color = Ink,
-                fontSize = 18.sp,
-                modifier = Modifier.fillMaxWidth().glass().padding(16.dp),
+                fontSize = 16.sp,
+                modifier = Modifier.fillMaxWidth().flatCard(Color.White).padding(16.dp),
             )
         }
-        alerts.forEach { alert ->
+        shown.forEach { alert ->
             FeedCard(
                 alert = alert,
                 canPlay = clipReady(alert),
@@ -98,6 +112,31 @@ fun ResponderScreen(
 }
 
 @Composable
+private fun FilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    BoxChip(
+        label = label,
+        background = if (selected) Ink else Color.White,
+        foreground = if (selected) Color.White else Ink,
+        onClick = onClick,
+    )
+}
+
+@Composable
+private fun BoxChip(label: String, background: Color, foreground: Color, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .height(40.dp)
+            .clip(CircleShape)
+            .background(background)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, color = foreground, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
 private fun FeedCard(
     alert: Alert,
     canPlay: Boolean,
@@ -106,64 +145,38 @@ private fun FeedCard(
     onShowQr: () -> Unit,
 ) {
     var open by rememberSaveable(alert.id) { mutableStateOf(false) }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(IntrinsicSize.Min)
-            .glass(),
-    ) {
-        Box(
-            Modifier
-                .width(6.dp)
-                .fillMaxHeight()
-                .background(alert.urgency.stripe()),
-        )
-        Column(
-            Modifier
-                .weight(1f)
-                .clickable { open = !open }
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                UrgencyChip(alert.urgency)
-                SourcePill(alert.summarySource)
-                if (canPlay) {
-                    Box(Modifier.weight(1f))
-                    PlayButton(onClick = onPlay)
-                }
-            }
-            Text(alert.summary, color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-            Text(
-                text = "${formatHops(alert.hops)} · ${formatWhen(alert.createdAtMillis)} · ${formatGps(alert.lat, alert.lon)}",
-                color = InkSoft,
-                fontSize = 14.sp,
-            )
-            if (open) {
-                Text(alert.transcript, color = Ink, fontSize = 18.sp)
-                Row {
-                    TextButton(onClick = onShowQr, modifier = Modifier.height(56.dp)) {
-                        Text("QR", color = Ink, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+    val ink = alert.urgency.onCard()
+    val darkArrow = alert.urgency == Urgency.NEEDS_HELP
+    val clipNote = if (canPlay) " · voice clip" else ""
+    InfoCard(
+        background = alert.urgency.cardFill(),
+        label = "${alert.urgency.label} · ${formatWhen(alert.createdAtMillis)}",
+        title = alert.summary,
+        details = "${formatHops(alert.hops)} · ${formatGps(alert.lat, alert.lon)}$clipNote · ${sourceLabel(alert.summarySource)}",
+        ink = ink,
+        arrowBackground = if (darkArrow) Ink else Color.White,
+        arrowTint = if (darkArrow) Color.White else Ink,
+        arrowDescription = if (open) "Hide transcript" else "Show transcript",
+        onArrow = { open = !open },
+        minHeight = 150.dp,
+        extra = if (!open) {
+            null
+        } else {
+            {
+                Text(alert.transcript, color = ink, fontSize = 16.sp)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    if (canPlay) PlayButton(onClick = onPlay)
+                    TextButton(onClick = onShowQr, modifier = Modifier.height(48.dp)) {
+                        Text("QR", color = ink, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                     }
-                    TextButton(onClick = onDelete, modifier = Modifier.height(56.dp)) {
-                        Text("Delete", color = InkSoft, fontSize = 16.sp)
+                    TextButton(onClick = onDelete, modifier = Modifier.height(48.dp)) {
+                        Text("Delete", color = ink, fontSize = 16.sp)
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-fun PlayButton(onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .size(56.dp)
-            .clip(CircleShape)
-            .background(SafeGreen)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(Icons.Filled.PlayArrow, contentDescription = "Play voice clip", tint = Color.White)
-    }
+        },
+    )
 }

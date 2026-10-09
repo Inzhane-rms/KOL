@@ -11,8 +11,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -21,7 +23,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -51,10 +53,10 @@ import ph.appbuilders.saklolo.ask.AskResult
 import ph.appbuilders.saklolo.ask.SafetyBank
 import ph.appbuilders.saklolo.summary.GemmaSummarizer
 import ph.appbuilders.saklolo.ui.theme.CriticalRed
-import ph.appbuilders.saklolo.ui.theme.ForestDeep
 import ph.appbuilders.saklolo.ui.theme.ForestMid
 import ph.appbuilders.saklolo.ui.theme.Ink
 import ph.appbuilders.saklolo.ui.theme.InkSoft
+import ph.appbuilders.saklolo.ui.theme.MintWash
 
 private data class AskTurn(val id: Long, val question: String, val result: AskResult)
 
@@ -98,12 +100,18 @@ fun AskScreen(onOpenRecorder: () -> Unit) {
         scroll.animateScrollTo(scroll.maxValue)
     }
 
-    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp)
+            .navigationBarsPadding()
+            .padding(bottom = 96.dp),
+    ) {
         Column(
             Modifier
                 .weight(1f)
                 .verticalScroll(scroll),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             turns.forEach { turn ->
                 QuestionBubble(turn.question)
@@ -116,10 +124,10 @@ fun AskScreen(onOpenRecorder: () -> Unit) {
         }
         Text(
             "TRY ASKING",
-            color = Color.White,
-            fontSize = 12.sp,
+            color = Ink,
+            fontSize = 13.sp,
             fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
+            modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
         )
         Row(
             Modifier
@@ -131,11 +139,11 @@ fun AskScreen(onOpenRecorder: () -> Unit) {
                 Text(
                     text = suggestion.label,
                     color = Ink,
-                    fontSize = 15.sp,
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier
                         .clip(CircleShape)
-                        .background(Color.White)
+                        .background(MintWash)
                         .clickable { ask(suggestion.question) }
                         .padding(horizontal = 14.dp, vertical = 10.dp),
                 )
@@ -143,12 +151,12 @@ fun AskScreen(onOpenRecorder: () -> Unit) {
         }
         Row(
             modifier = Modifier
-                .padding(top = 12.dp, bottom = 8.dp)
+                .padding(top = 12.dp)
                 .fillMaxWidth()
-                .height(52.dp)
-                .clip(RoundedCornerShape(26.dp))
+                .height(60.dp)
+                .clip(RoundedCornerShape(30.dp))
                 .background(Color.White)
-                .padding(start = 16.dp, end = 6.dp),
+                .padding(start = 18.dp, end = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             BasicTextField(
@@ -163,7 +171,7 @@ fun AskScreen(onOpenRecorder: () -> Unit) {
                 decorationBox = { inner ->
                     Box {
                         if (draft.isEmpty()) {
-                            Text("Magtanong... / Ask a question", color = InkSoft, fontSize = 16.sp)
+                            Text("Magtanong… / Ask a question", color = InkSoft, fontSize = 16.sp)
                         }
                         inner()
                     }
@@ -171,13 +179,13 @@ fun AskScreen(onOpenRecorder: () -> Unit) {
             )
             Box(
                 modifier = Modifier
-                    .size(40.dp)
+                    .size(44.dp)
                     .clip(CircleShape)
                     .background(ForestMid)
                     .clickable { ask(draft) },
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Filled.PlayArrow, contentDescription = "Ask", tint = Color.White)
+                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "Ask", tint = Color.White)
             }
         }
     }
@@ -185,76 +193,66 @@ fun AskScreen(onOpenRecorder: () -> Unit) {
 
 @Composable
 private fun QuestionBubble(text: String) {
-    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
         Text(
             text = text,
             color = Color.White,
             fontSize = 16.sp,
             modifier = Modifier
-                .fillMaxWidth(0.86f)
+                .widthIn(max = 300.dp)
                 .clip(RoundedCornerShape(20.dp))
-                .background(ForestDeep.copy(alpha = 0.85f))
-                .padding(horizontal = 14.dp, vertical = 12.dp),
+                .background(Ink)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
         )
     }
 }
 
 @Composable
 private fun TipCard(result: AskResult.Tip, bank: SafetyBank) {
-    Column(
-        Modifier.fillMaxWidth().glass().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text("SAGOT SA: ${result.askedLabel}", color = InkSoft, fontSize = 13.sp)
-        Text(result.answerTl, color = Ink, fontSize = 19.sp, fontWeight = FontWeight.Bold)
-        Text(result.answerEn, color = Ink, fontSize = 15.sp)
-        Box(Modifier.fillMaxWidth().height(1.dp).background(InkSoft.copy(alpha = 0.25f)))
-        Text("Source: ${bank.sourceLabel(result.sourceCode)}", color = InkSoft, fontSize = 13.sp)
-        Text(bank.disclaimerEn, color = InkSoft, fontSize = 13.sp)
-        Text(bank.disclaimerTl, color = InkSoft, fontSize = 13.sp)
-    }
+    AnswerCard(
+        label = "ANSWER TO: ${result.askedLabel}",
+        title = result.answerTl,
+        details = result.answerEn,
+        footnote = "${bank.sourceLabel(result.sourceCode)} · ${bank.disclaimerEn} ${bank.disclaimerTl}",
+    )
 }
 
 @Composable
 private fun FallbackCard(question: String, result: AskResult.Fallback, bank: SafetyBank) {
+    AnswerCard(
+        label = "ANSWER TO: $question",
+        title = result.answerTl,
+        details = result.answerEn,
+        footnote = "${bank.disclaimerEn} ${bank.disclaimerTl}",
+    )
+}
+
+@Composable
+private fun AnswerCard(label: String, title: String, details: String, footnote: String) {
     Column(
-        Modifier.fillMaxWidth().glass().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        Modifier.flatCard(Color.White).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text("SAGOT SA: $question", color = InkSoft, fontSize = 13.sp)
-        Text(result.answerTl, color = Ink, fontSize = 19.sp, fontWeight = FontWeight.Bold)
-        Text(result.answerEn, color = Ink, fontSize = 15.sp)
-        Box(Modifier.fillMaxWidth().height(1.dp).background(InkSoft.copy(alpha = 0.25f)))
-        Text(bank.disclaimerEn, color = InkSoft, fontSize = 13.sp)
-        Text(bank.disclaimerTl, color = InkSoft, fontSize = 13.sp)
+        Text(label, color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        Text(title, color = Ink, fontSize = 21.sp, fontWeight = FontWeight.Bold)
+        Text(details, color = InkSoft, fontSize = 14.sp)
+        Text(footnote, color = InkSoft, fontSize = 12.sp)
     }
 }
 
 @Composable
 private fun EmergencyCard(result: AskResult.Emergency, onOpenRecorder: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(CriticalRed)
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text(result.answerTl, color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold)
-        Text(result.answerEn, color = Color.White, fontSize = 15.sp)
-        Box(
-            modifier = Modifier
-                .padding(top = 4.dp)
-                .fillMaxWidth()
-                .height(52.dp)
-                .clip(RoundedCornerShape(26.dp))
-                .background(Color.White)
-                .clickable(onClick = onOpenRecorder),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text("Open SOS recorder", color = CriticalRed, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-        }
-    }
+    InfoCard(
+        background = CriticalRed,
+        label = "EMERGENCY?",
+        title = result.answerTl,
+        details = result.answerEn,
+        ink = Color.White,
+        arrowBackground = Color.White,
+        arrowTint = Ink,
+        arrowDescription = "Open SOS recorder",
+        onArrow = onOpenRecorder,
+    )
 }
 
 private fun loadBank(context: Context): SafetyBank =

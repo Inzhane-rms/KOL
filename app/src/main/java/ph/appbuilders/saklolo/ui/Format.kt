@@ -31,6 +31,11 @@ fun formatHops(hops: Int): String = when (hops) {
     else -> "$hops hops"
 }
 
+fun phonesNearby(count: Int): String = when (count) {
+    1 -> "1 phone nearby"
+    else -> "$count phones nearby"
+}
+
 fun formatNearby(count: Int): String = when (count) {
     1 -> "Offline · 1 phone nearby"
     else -> "Offline · $count phones nearby"

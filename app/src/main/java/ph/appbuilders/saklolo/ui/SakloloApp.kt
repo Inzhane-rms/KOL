@@ -13,7 +13,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -26,9 +26,8 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -40,7 +39,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
@@ -53,12 +51,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import ph.appbuilders.saklolo.SakloloViewModel
+import ph.appbuilders.saklolo.SosUiState
 import ph.appbuilders.saklolo.model.Alert
 import ph.appbuilders.saklolo.relay.RelayService
-import ph.appbuilders.saklolo.ui.theme.ForestDeep
-import ph.appbuilders.saklolo.ui.theme.ForestMid
+import ph.appbuilders.saklolo.triage.Urgency
 import ph.appbuilders.saklolo.ui.theme.ForestMint
 import ph.appbuilders.saklolo.ui.theme.Ink
+import ph.appbuilders.saklolo.ui.theme.InkSoft
+import ph.appbuilders.saklolo.ui.theme.Page
 
 private const val RECORD = "record"
 private const val ASK = "ask"
@@ -101,24 +101,17 @@ fun SakloloApp(viewModel: SakloloViewModel) {
         ?: alerts.firstOrNull { viewModel.clipReady(it) && it.hops == 0 }
         ?: alerts.firstOrNull { it.hops == 0 }
 
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    0f to ForestDeep,
-                    0.55f to ForestMid,
-                    1f to ForestMint,
-                ),
-            ),
-    ) {
+    Box(Modifier.fillMaxSize().background(Page)) {
         Column(Modifier.fillMaxSize()) {
-            Header(
-                route = route,
-                peerCount = peers.size,
-                onSettings = { settingsOpen = true },
+            TopBar(
+                gemmaLoading = sos.gemmaLoading,
+                onBack = {
+                    if (route == RECORD) settingsOpen = true else route = RECORD
+                },
+                backDescription = if (route == RECORD) "Settings" else "Back",
             )
-            Box(Modifier.weight(1f)) {
+            ScreenHeading(route, alerts, sos)
+            Box(Modifier.weight(1f).fillMaxWidth()) {
                 if (route == ASK) {
                     AskScreen(onOpenRecorder = { route = RECORD })
                 } else if (route == RECORD) {
@@ -159,13 +152,14 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                     )
                 }
             }
-            BottomSwitcher(
-                route = route,
-                onRecord = { route = RECORD },
-                onAsk = { route = ASK },
-                onFeed = { route = FEED },
-            )
         }
+        BottomSwitcher(
+            route = route,
+            onRecord = { route = RECORD },
+            onAsk = { route = ASK },
+            onFeed = { route = FEED },
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
     }
 
     if (settingsOpen) {
@@ -184,38 +178,89 @@ fun SakloloApp(viewModel: SakloloViewModel) {
 }
 
 @Composable
-private fun Header(route: String, peerCount: Int, onSettings: () -> Unit) {
-    val asking = route == ASK
+private fun TopBar(gemmaLoading: Boolean, onBack: () -> Unit, backDescription: String) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .statusBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 24.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            text = if (asking) "Ask B-LINK" else "B-LINK",
-            color = Color.White,
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold,
-        )
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(CircleShape)
+                .background(Color.White)
+                .clickable(onClick = onBack),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = backDescription, tint = Ink)
+        }
         Spacer(Modifier.weight(1f))
-        Text(
-            text = if (asking) "Offline · tips only" else formatNearby(peerCount),
-            color = Color.White,
-            fontSize = 14.sp,
+        Row(
             modifier = Modifier
                 .clip(CircleShape)
-                .background(Color.White.copy(alpha = 0.16f))
-                .border(1.dp, Color.White.copy(alpha = 0.35f), CircleShape)
+                .background(Color.White)
                 .padding(horizontal = 12.dp, vertical = 8.dp),
-        )
-        if (!asking) {
-            IconButton(onClick = onSettings, modifier = Modifier.size(56.dp)) {
-                Icon(Icons.Filled.Settings, contentDescription = "Settings", tint = Color.White)
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(ForestMint),
+            )
+            Text(
+                text = if (gemmaLoading) "AI loading…" else "Offline",
+                color = Ink,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(start = 6.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ScreenHeading(route: String, alerts: List<Alert>, sos: SosUiState) {
+    val title = when (route) {
+        FEED -> "Alerts"
+        ASK -> "Ask B-LINK"
+        else -> "Send SOS"
+    }
+    val subtitle = when (route) {
+        FEED -> feedSubtitle(alerts)
+        ASK -> "Answers from official safety guides only"
+        else -> "Hold the button and speak in Tagalog"
+    }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 16.dp),
+    ) {
+        Text(title, color = Ink, fontSize = 40.sp, fontWeight = FontWeight.Bold)
+        Text(subtitle, color = InkSoft, fontSize = 16.sp, modifier = Modifier.padding(top = 4.dp))
+        if (route == RECORD) {
+            recordStatusLine(sos)?.let { line ->
+                Text(line, color = InkSoft, fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp))
             }
         }
     }
+}
+
+private fun feedSubtitle(alerts: List<Alert>): String {
+    val critical = alerts.count { it.urgency == Urgency.CRITICAL }
+    val help = alerts.count { it.urgency == Urgency.NEEDS_HELP }
+    val safe = alerts.count { it.urgency == Urgency.SAFE }
+    return "$critical critical · $help needs help · $safe safe"
+}
+
+private fun recordStatusLine(state: SosUiState): String? {
+    state.error?.let { return it }
+    val idle = "Hold the button and speak. Tagalog, Bisaya, or English."
+    if (state.status != idle) return state.status
+    if (!state.modelReady) return state.modelStatus
+    return null
 }
 
 @Composable
@@ -223,12 +268,12 @@ private fun QrDialog(alert: Alert, payload: String, onDismiss: () -> Unit) {
     Dialog(onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier
-                .clip(RoundedCornerShape(24.dp))
+                .clip(RoundedCornerShape(28.dp))
                 .background(Color.White)
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text(alert.summary, color = Ink, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            Text(alert.summary, color = Ink, fontWeight = FontWeight.Bold, fontSize = 21.sp)
             Image(
                 bitmap = qrBitmap(payload).asImageBitmap(),
                 contentDescription = "Alert QR code",
