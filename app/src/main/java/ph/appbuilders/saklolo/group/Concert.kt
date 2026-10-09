@@ -160,17 +160,23 @@ data class SendPlan(
 
 object PayloadOrder {
     /**
-     * Text and urgent messages are BYTES and leave before any FILE.
-     * In-flight FILE payload ids are cancelled so those bytes are not stuck behind a clip.
+     * Text, urgent, and voice BYTES are ordered ahead of FILE pieces in the same send.
+     * An in-flight FILE is not cancelled and not restarted. The bytes go out beside it.
      */
     fun plan(inFlightFilePayloadIds: List<Long>, pending: List<RelayPiece>): SendPlan {
         val urgent = pending.filter { it.kind == PieceKind.URGENT_BYTES }
         val text = pending.filter { it.kind == PieceKind.TEXT_BYTES }
         val voice = pending.filter { it.kind == PieceKind.VOICE_BYTES }
         val files = pending.filter { it.kind == PieceKind.FILE }
-        val bytes = urgent + text + voice
-        val cancel = if (bytes.isNotEmpty()) inFlightFilePayloadIds else emptyList()
-        return SendPlan(cancel, bytes + files)
+        return SendPlan(cancelFilePayloadIds = emptyList(), ordered = urgent + text + voice + files)
+    }
+
+    /** A text send keeps every in-flight clip id and does not ask the relay to restart them. */
+    fun textBesideClip(inFlightFilePayloadIds: List<Long>, messageId: String): SendPlan {
+        val plan = plan(inFlightFilePayloadIds, sequence(messageId, "text", hasAudio = false))
+        check(plan.cancelFilePayloadIds.isEmpty())
+        check(inFlightFilePayloadIds.isEmpty() || plan.ordered.none { it.kind == PieceKind.FILE })
+        return plan
     }
 
     /** The transcript BYTES payload is sent before the audio FILE. */

@@ -82,6 +82,7 @@ fun SakloloApp(viewModel: SakloloViewModel) {
     var nameDraft by remember { mutableStateOf(viewModel.displayName()) }
     var askName by remember { mutableStateOf(viewModel.needsNamePrompt()) }
     var settingsOpen by remember { mutableStateOf(false) }
+    var aboutOpen by remember { mutableStateOf(false) }
     var askedBattery by remember { mutableStateOf(false) }
     var askedMic by remember { mutableStateOf(false) }
     var micBlocked by remember { mutableStateOf(false) }
@@ -347,6 +348,7 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                 onScan = { scanQr() },
                 status = statusText,
                 onStatus = { pillTapped = true },
+                onAbout = { aboutOpen = true },
             )
         }
         if (micBlocked) {
@@ -413,6 +415,10 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                 onContinue = { dismissSetup() },
             )
         }
+    }
+
+    if (aboutOpen) {
+        DisclosureDialog(onClose = { aboutOpen = false })
     }
 
     if (settingsOpen) {

@@ -42,6 +42,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -54,6 +55,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -61,6 +63,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ph.appbuilders.saklolo.CallUi
 import ph.appbuilders.saklolo.CaptionLine
+import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import ph.appbuilders.saklolo.audio.Waveform
 import ph.appbuilders.saklolo.contact.CaptionDisplay
 import ph.appbuilders.saklolo.contact.ContactRow
 import ph.appbuilders.saklolo.contact.Conversation
@@ -366,6 +372,7 @@ fun V17Contacts(
     onScan: () -> Unit,
     status: String,
     onStatus: () -> Unit,
+    onAbout: () -> Unit,
 ) {
     val inRange = rows.count { it.inRange }
     val favorites = rows.count { it.favorite }
@@ -380,7 +387,17 @@ fun V17Contacts(
         item {
             Spacer(Modifier.height(8.dp))
             OfflinePill(right = status, onRight = onStatus)
-            Text("Contacts", color = Ink, fontFamily = Poppins, fontWeight = FontWeight.Bold, fontSize = 26.sp, modifier = Modifier.padding(top = 16.dp))
+            Row(Modifier.padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Contacts", color = Ink, fontFamily = Poppins, fontWeight = FontWeight.Bold, fontSize = 26.sp, modifier = Modifier.weight(1f))
+                Text(
+                    "About",
+                    color = VioletDeep,
+                    fontFamily = Poppins,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp,
+                    modifier = Modifier.clickable(onClick = onAbout),
+                )
+            }
             Text("Tap a name to open · call anyone in range", color = InkSoft, fontFamily = Poppins, fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp, bottom = 12.dp))
         }
         item {
@@ -592,8 +609,58 @@ private fun VoiceBubble(message: DirectMessage, mine: Boolean, onPlay: (String?)
             }
             Text(if (mine) "You" else message.senderName, color = Ink, fontFamily = Poppins, fontWeight = FontWeight.Bold, fontSize = 12.sp, modifier = Modifier.padding(start = 8.dp))
         }
+        WaveBars(message.audioPath)
         Text("“${CaptionDisplay.text(message.body)}”", color = Ink, fontFamily = Poppins, fontWeight = FontWeight.Bold, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
         Text("On-device AI", color = CyanText, fontFamily = Poppins, fontWeight = FontWeight.SemiBold, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp).clip(CircleShape).background(CyanLight).padding(horizontal = 8.dp, vertical = 2.dp))
+    }
+}
+
+@Composable
+fun DisclosureDialog(onClose: () -> Unit) {
+    Dialog(onDismissRequest = onClose) {
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(CardWhite).padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(ModelDisclosure.TITLE, color = Ink, fontFamily = Poppins, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+            ModelDisclosure.LINES.forEach { line ->
+                Text(line, color = Ink, fontFamily = Poppins, fontSize = 14.sp)
+            }
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                Text(
+                    "Close",
+                    color = VioletDeep,
+                    fontFamily = Poppins,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp,
+                    modifier = Modifier.clickable(onClick = onClose).padding(8.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun WaveBars(path: String?) {
+    if (path.isNullOrBlank()) return
+    val bars by produceState(emptyList<Float>(), path) {
+        value = withContext(Dispatchers.IO) { Waveform.bars(File(path), 24) }
+    }
+    if (bars.isEmpty()) return
+    Row(
+        Modifier.padding(top = 8.dp).fillMaxWidth().height(28.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        bars.forEach { height ->
+            Box(
+                Modifier
+                    .weight(1f)
+                    .height((6 + 22 * height).dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(Violet),
+            )
+        }
     }
 }
 

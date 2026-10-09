@@ -115,6 +115,14 @@ Nearby Connections uses Google Play Services. A phone without Play Services can 
 
 The rotating tips are short lines based on public guidance from the Philippine government Disaster Preparedness & First Aid Handbook and UNICEF Philippines. They are reminders on the recorder screen, not a substitute for official warnings.
 
+## On-device models
+
+The app does not declare the `INTERNET` permission. These are the only models that can run, and the same list is on the in-app **About** screen (Contacts → About):
+
+- **Whisper multilingual base**, file `ggml-base-q5_1.bin`. Speech to text on the phone. The language is forced to Tagalog.
+- **Rules engine** in `TriageEngine`. Keyword and phrase matching for emergencies. Not a neural model.
+- **Gemma 3 1B** int4, only if `gemma3-1b-it-int4.task` was placed on the phone. If it is missing, the rules engine is used.
+
 ## DISCLOSURE
 
 Everything below is part of how B-LINK was built or how it runs. The on-device path does not send audio, transcripts, or alerts to a cloud model.

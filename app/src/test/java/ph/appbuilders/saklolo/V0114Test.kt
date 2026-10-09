@@ -48,11 +48,22 @@ class V0114Test {
                 RelayPiece(PieceKind.VOICE_BYTES, "voice"),
             ),
         )
-        assertEquals(listOf(7L, 8L), plan.cancelFilePayloadIds)
+        assertTrue(plan.cancelFilePayloadIds.isEmpty())
         assertEquals(listOf("urgent", "text", "voice", "clip"), plan.ordered.map { it.id })
         assertEquals(PieceKind.URGENT_BYTES, plan.ordered.first().kind)
         val filesOnly = PayloadOrder.plan(listOf(1L), listOf(RelayPiece(PieceKind.FILE, "a")))
         assertTrue(filesOnly.cancelFilePayloadIds.isEmpty())
+    }
+
+    @Test
+    fun textDoesNotCancelOrRestartAnInFlightClip() {
+        val plan = PayloadOrder.textBesideClip(inFlightFilePayloadIds = listOf(42L, 43L), messageId = "hello")
+        assertTrue(plan.cancelFilePayloadIds.isEmpty())
+        assertEquals(listOf(PieceKind.TEXT_BYTES), plan.ordered.map { it.kind })
+        assertEquals("hello", plan.ordered.single().id)
+        val urgent = PayloadOrder.plan(listOf(9L), PayloadOrder.sequence("u", Urgent.KIND, hasAudio = false))
+        assertTrue(urgent.cancelFilePayloadIds.isEmpty())
+        assertEquals(PieceKind.URGENT_BYTES, urgent.ordered.single().kind)
     }
 
     @Test

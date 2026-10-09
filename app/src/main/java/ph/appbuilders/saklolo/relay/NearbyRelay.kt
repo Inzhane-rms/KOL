@@ -153,17 +153,14 @@ class NearbyRelay(
         enqueue(live = true) {
             val withClip = !message.audioPath.isNullOrBlank()
             Log.i(BLINK, "send type=${message.kind} id=${message.id} endpoints=${peers.size} clips=$withClip")
-            val parked = preemptInFlightClips()
-            val resumed = HashSet<String>()
+            val inflight = synchronized(clipLock) { outgoingClips.keys.toList() }
+            val beside = PayloadOrder.textBesideClip(inflight, message.id)
+            if (beside.cancelFilePayloadIds.isNotEmpty()) {
+                preemptInFlightClips()
+            }
             for (job in ResyncPlan.live(peers.map { it.endpointId }, message, withClip)) {
                 deliverDirect(job.endpointId, job.messages, job.attachClips)
-                resumeClips(parked.filter { it.endpointId == job.endpointId })
-                resumed += job.endpointId
             }
-            parked.filter { it.endpointId !in resumed }
-                .groupBy { it.endpointId }
-                .values
-                .forEach { resumeClips(it) }
         }
         return peers.size
     }
@@ -274,7 +271,7 @@ class NearbyRelay(
         return delivered
     }
 
-    /** Cancel FILE clips that are still transferring so text and urgent BYTES are not queued behind them. */
+    /** Kept for a plan that lists clip ids to cancel. Text sends pass an empty list and do not call this. */
     private fun preemptInFlightClips(): List<OutClip> {
         val inflight = synchronized(clipLock) { outgoingClips.values.toList() }
         val plan = PayloadOrder.plan(

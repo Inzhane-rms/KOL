@@ -474,13 +474,26 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         if (!state.actionable || state.urgency == null) return
         val location = DeviceLocation.lastKnown(getApplication())
         val id = java.util.UUID.randomUUID().toString()
-        val audioPath = lastPcm?.let { samples -> ClipStore.write(runtime.clipsDir, id, samples) }
+        val samples = lastPcm
         lastPcm = null
+        viewModelScope.launch(Dispatchers.IO) {
+            val audioPath = samples?.let { ClipStore.write(runtime.clipsDir, id, it) }
+            publishDraft(id, state, location, audioPath)
+        }
+        return
+    }
+
+    private fun publishDraft(
+        id: String,
+        state: SosUiState,
+        location: Pair<Double, Double>?,
+        audioPath: String?,
+    ) {
         val alert = Alert(
             id = id,
             transcript = state.transcript.trim().take(800),
             summary = state.summary.take(180),
-            urgency = state.urgency,
+            urgency = state.urgency ?: return,
             createdAtMillis = System.currentTimeMillis(),
             lat = location?.first,
             lon = location?.second,
@@ -752,18 +765,25 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     fun playNote(path: String?) {
         val file = path?.let { File(it) }
         if (file == null || !file.exists()) return
-        try {
-            player?.release()
-            player = MediaPlayer().apply {
-                setDataSource(file.absolutePath)
-                setOnCompletionListener {
-                    it.release()
-                    if (player === it) player = null
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val next = MediaPlayer().apply {
+                    setDataSource(file.absolutePath)
+                    setOnCompletionListener { done ->
+                        viewModelScope.launch(Dispatchers.Main) {
+                            done.release()
+                            if (player === done) player = null
+                        }
+                    }
+                    prepare()
                 }
-                prepare()
-                start()
+                withContext(Dispatchers.Main) {
+                    player?.release()
+                    player = next
+                    next.start()
+                }
+            } catch (_: Exception) {
             }
-        } catch (_: Exception) {
         }
     }
 
@@ -800,7 +820,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
                 val peer = voicePeer
                 val location = DeviceLocation.lastKnown(getApplication())
                 val id = java.util.UUID.randomUUID().toString()
-                val audioPath = ClipStore.write(runtime.clipsDir, id, pcm)
+                val audioPath = withContext(Dispatchers.IO) { ClipStore.write(runtime.clipsDir, id, pcm) }
                 if (session != voiceSession ||
                     VoiceDraft.decide(epoch, voiceEpoch, decision.body) is VoiceDraft.Finish.Discarded
                 ) {
@@ -941,19 +961,26 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
             _sos.update { it.copy(error = "That voice clip is not on this phone.") }
             return
         }
-        try {
-            player?.release()
-            player = MediaPlayer().apply {
-                setDataSource(file.absolutePath)
-                setOnCompletionListener {
-                    it.release()
-                    if (player === it) player = null
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val next = MediaPlayer().apply {
+                    setDataSource(file.absolutePath)
+                    setOnCompletionListener { done ->
+                        viewModelScope.launch(Dispatchers.Main) {
+                            done.release()
+                            if (player === done) player = null
+                        }
+                    }
+                    prepare()
                 }
-                prepare()
-                start()
+                withContext(Dispatchers.Main) {
+                    player?.release()
+                    player = next
+                    next.start()
+                }
+            } catch (error: Exception) {
+                _sos.update { it.copy(error = error.message ?: "Could not play the voice clip") }
             }
-        } catch (error: Exception) {
-            _sos.update { it.copy(error = error.message ?: "Could not play the voice clip") }
         }
     }
 
@@ -1128,7 +1155,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
             val body = text.trim()
             if (body.isNotEmpty() && peer.isNotBlank()) {
                 val id = java.util.UUID.randomUUID().toString()
-                val audioPath = ClipStore.write(runtime.clipsDir, id, pcm)
+                val audioPath = withContext(Dispatchers.IO) { ClipStore.write(runtime.clipsDir, id, pcm) }
                 val message = DirectMessage(
                     id = id,
                     fromDeviceId = deviceId(),
@@ -1316,29 +1343,40 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
             noteCall(call.copy(playing = false))
             return false
         }
-        return try {
-            player?.release()
-            val attrs = AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_MEDIA)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                .build()
-            player = MediaPlayer().apply {
-                setAudioAttributes(attrs)
-                setDataSource(file.absolutePath)
-                setOnCompletionListener {
-                    it.release()
-                    if (player === it) player = null
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val attrs = AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+                val next = MediaPlayer().apply {
+                    setAudioAttributes(attrs)
+                    setDataSource(file.absolutePath)
+                    setOnCompletionListener { done ->
+                        viewModelScope.launch(Dispatchers.Main) {
+                            done.release()
+                            if (player === done) player = null
+                            noteCall(call.copy(playing = false))
+                            publishCall()
+                        }
+                    }
+                    prepare()
+                }
+                withContext(Dispatchers.Main) {
+                    player?.release()
+                    player = next
+                    next.start()
+                    noteCall(call.copy(playing = true))
+                    publishCall()
+                }
+            } catch (_: Exception) {
+                withContext(Dispatchers.Main) {
                     noteCall(call.copy(playing = false))
                     publishCall()
                 }
-                prepare()
-                start()
             }
-            true
-        } catch (_: Exception) {
-            noteCall(call.copy(playing = false))
-            false
         }
+        return true
     }
 
     override fun onCleared() {
