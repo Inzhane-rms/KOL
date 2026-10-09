@@ -16,6 +16,14 @@ import com.google.android.gms.nearby.connection.PayloadCallback
 import com.google.android.gms.nearby.connection.PayloadTransferUpdate
 import com.google.android.gms.nearby.connection.Strategy
 import ph.appbuilders.saklolo.audio.WavPcm
+import ph.appbuilders.saklolo.group.ClipGate
+import ph.appbuilders.saklolo.group.GroupNote
+import ph.appbuilders.saklolo.group.GroupStore
+import ph.appbuilders.saklolo.group.PieceKind
+import ph.appbuilders.saklolo.group.RelayPiece
+import ph.appbuilders.saklolo.group.SosDispatch
+import ph.appbuilders.saklolo.group.toGroupNote
+import ph.appbuilders.saklolo.group.toWire
 import ph.appbuilders.saklolo.model.Alert
 import ph.appbuilders.saklolo.model.AlertJson
 import ph.appbuilders.saklolo.model.AlertStore
@@ -35,8 +43,10 @@ import java.util.concurrent.Executors
 class NearbyRelay(
     context: Context,
     private val store: AlertStore,
+    private val groupStore: GroupStore,
     private val clipsDir: File,
     private val onAlertsChanged: () -> Unit,
+    private val onGroupsChanged: () -> Unit,
     private val onStatus: (peers: List<NearbyPeer>, message: String) -> Unit,
 ) {
     private val appContext = context.applicationContext
@@ -46,6 +56,7 @@ class NearbyRelay(
     private val incomingPayloads = HashMap<Long, Payload>()
     private val payloadToAlert = HashMap<Long, String>()
     private val completedFiles = HashMap<Long, File>()
+    private val outgoingClips = LinkedHashMap<Long, OutClip>()
     private val io = Executors.newSingleThreadExecutor { runnable -> Thread(runnable, "saklolo-relay-io") }
 
     init {
@@ -80,6 +91,8 @@ class NearbyRelay(
     fun peers(): List<NearbyPeer> = endpoints.snapshot()
 
     fun broadcast(alert: Alert): Int = send(listOf(alert), exceptEndpoint = null, forceClips = true)
+
+    fun broadcastNote(note: GroupNote): Int = sendNotes(listOf(note), exceptEndpoint = null, forceClips = true)
 
     private fun beginAdvertising() {
         val advertising = AdvertisingOptions.Builder().setStrategy(Strategy.P2P_CLUSTER).build()
@@ -117,42 +130,127 @@ class NearbyRelay(
         if (targets.isEmpty()) return 0
         val wire = prepared.mapNotNull { RelayPolicy.outgoing(it) }
         if (wire.isEmpty()) return 0
+        val parked = preemptInFlightClips()
         var delivered = 0
+        val resumed = HashSet<String>()
         for (peer in targets) {
-            if (sendOne(peer.endpointId, wire)) delivered++
+            if (deliverAlerts(peer.endpointId, wire)) delivered++
+            resumeClips(parked.filter { it.endpointId == peer.endpointId })
+            resumed += peer.endpointId
         }
+        parked.filter { it.endpointId !in resumed }
+            .groupBy { it.endpointId }
+            .values
+            .forEach { resumeClips(it) }
         return delivered
     }
 
-    private fun sendOne(endpointId: String, wire: List<Alert>): Boolean {
+    /** Cancel FILE clips that are still transferring so the SOS BYTES payload is not queued behind them. */
+    private fun preemptInFlightClips(): List<OutClip> {
+        val inflight = synchronized(clipLock) { outgoingClips.values.toList() }
+        val plan = SosDispatch.plan(
+            inflight.map { it.payloadId },
+            listOf(RelayPiece(PieceKind.SOS_BYTES, "sos")),
+        )
+        val cancel = plan.cancelFilePayloadIds.toSet()
+        val parked = inflight.filter { it.payloadId in cancel }
+        for (id in plan.cancelFilePayloadIds) {
+            runCatching { client.cancelPayload(id) }
+        }
+        synchronized(clipLock) {
+            plan.cancelFilePayloadIds.forEach { outgoingClips.remove(it) }
+        }
+        return parked
+    }
+
+    private fun resumeClips(clips: List<OutClip>) {
+        for (clip in clips.distinctBy { it.ownerId }) {
+            if (!clip.file.exists()) continue
+            if (clip.note) {
+                val note = groupStore.find(clip.ownerId) ?: continue
+                deliverNotes(clip.endpointId, listOf(note.copy(audioPath = clip.file.absolutePath)))
+            } else {
+                val alert = store.find(clip.ownerId) ?: continue
+                deliverAlerts(clip.endpointId, listOf(alert.copy(audioPath = clip.file.absolutePath)))
+            }
+        }
+    }
+
+    private fun deliverAlerts(endpointId: String, wire: List<Alert>): Boolean {
         val chunks = chunk(wire)
         var sent = false
         for (chunkAlerts in chunks) {
-            val clips = ArrayList<ClipLink>()
-            val files = ArrayList<Payload>()
-            for (alert in chunkAlerts) {
-                val path = alert.audioPath ?: continue
-                val file = File(path)
-                if (!file.exists() || file.length() !in 45..MAX_CLIP_BYTES) continue
-                val payload = try {
-                    Payload.fromFile(file)
-                } catch (error: Exception) {
-                    Log.w(TAG, "clip payload failed for ${alert.id}", error)
-                    continue
-                }
-                clips += ClipLink(alert.id, payload.id)
-                files += payload
-            }
-            val bytes = AlertJson.encodeEnvelope(chunkAlerts, clips).toByteArray(Charsets.UTF_8)
+            val files = prepareFiles(chunkAlerts.map { it.id to it.audioPath })
+            val bytes = AlertJson.encodeEnvelope(chunkAlerts, files.map { ClipLink(it.ownerId, it.payload.id) })
+                .toByteArray(Charsets.UTF_8)
             if (bytes.size > MAX_PAYLOAD) {
                 Log.w(TAG, "skipping oversized alert payload (${bytes.size} bytes)")
                 continue
             }
             client.sendPayload(endpointId, Payload.fromBytes(bytes))
-            files.forEach { client.sendPayload(endpointId, it) }
+            sendFiles(endpointId, files, note = false)
             sent = true
         }
         return sent
+    }
+
+    private fun sendNotes(notes: List<GroupNote>, exceptEndpoint: String?, forceClips: Boolean): Int {
+        val now = System.currentTimeMillis()
+        val prepared = notes.mapNotNull { note ->
+            if (note.hops >= RelayPolicy.MAX_HOPS) return@mapNotNull null
+            val keep = ClipRelay.includeClip(note.createdAtMillis, now, forceClips) &&
+                !note.audioPath.isNullOrBlank()
+            if (keep) note else note.copy(audioPath = null)
+        }
+        val targets = endpoints.snapshot(exceptEndpoint)
+        if (targets.isEmpty() || prepared.isEmpty()) return 0
+        var delivered = 0
+        for (peer in targets) {
+            if (deliverNotes(peer.endpointId, prepared)) delivered++
+        }
+        return delivered
+    }
+
+    private fun deliverNotes(endpointId: String, notes: List<GroupNote>): Boolean {
+        val files = prepareFiles(notes.map { it.id to it.audioPath })
+        val bytes = AlertJson.encodeEnvelope(
+            emptyList(),
+            files.map { ClipLink(it.ownerId, it.payload.id) },
+            notes.map { it.toWire() },
+        ).toByteArray(Charsets.UTF_8)
+        if (bytes.size > MAX_PAYLOAD) {
+            Log.w(TAG, "skipping oversized group payload (${bytes.size} bytes)")
+            return false
+        }
+        client.sendPayload(endpointId, Payload.fromBytes(bytes))
+        sendFiles(endpointId, files, note = true)
+        return true
+    }
+
+    private fun prepareFiles(owners: List<Pair<String, String?>>): List<ReadyClip> {
+        val ready = ArrayList<ReadyClip>()
+        for ((ownerId, path) in owners) {
+            if (path.isNullOrBlank()) continue
+            val file = File(path)
+            if (!file.exists() || !ClipGate.acceptLength(file.length())) continue
+            val payload = try {
+                Payload.fromFile(file)
+            } catch (error: Exception) {
+                Log.w(TAG, "clip payload failed for $ownerId", error)
+                continue
+            }
+            ready += ReadyClip(ownerId, payload, file)
+        }
+        return ready
+    }
+
+    private fun sendFiles(endpointId: String, files: List<ReadyClip>, note: Boolean) {
+        for (file in files) {
+            synchronized(clipLock) {
+                outgoingClips[file.payload.id] = OutClip(endpointId, file.payload.id, file.ownerId, file.file, note)
+            }
+            client.sendPayload(endpointId, file.payload)
+        }
     }
 
     private fun chunk(wire: List<Alert>): List<List<Alert>> {
@@ -185,6 +283,10 @@ class NearbyRelay(
             return
         }
         val fresh = store.ingest(packet.alerts)
+        val freshNotes = groupStore.ingest(
+            packet.notes.map { it.toGroupNote() },
+            System.currentTimeMillis(),
+        )
         val attachedNow = HashSet<String>()
         for (link in packet.clips) {
             val ready = synchronized(clipLock) {
@@ -195,11 +297,16 @@ class NearbyRelay(
                 attachedNow += link.alertId
             }
         }
-        if (fresh.isNotEmpty() || attachedNow.isNotEmpty()) onAlertsChanged()
+        if (fresh.isNotEmpty() || attachedNow.any { store.find(it) != null }) onAlertsChanged()
+        if (freshNotes.isNotEmpty() || attachedNow.any { groupStore.find(it) != null }) onGroupsChanged()
         sweepPending()
         val pendingForward = fresh.filter { it.id !in attachedNow }
         if (pendingForward.isNotEmpty()) {
             send(pendingForward, exceptEndpoint = fromEndpoint, forceClips = true)
+        }
+        val pendingNotes = freshNotes.filter { it.id !in attachedNow }
+        if (pendingNotes.isNotEmpty()) {
+            sendNotes(pendingNotes, exceptEndpoint = fromEndpoint, forceClips = true)
         }
         if (fresh.isNotEmpty()) {
             publish("Received ${fresh.size} alert${if (fresh.size == 1) "" else "s"}")
@@ -241,8 +348,12 @@ class NearbyRelay(
             }
         }
         if (alertId != null) {
-            if (storeClip(alertId, temp, fromEndpoint)) onAlertsChanged()
-            else if (temp.exists()) {
+            val forAlert = store.find(alertId) != null
+            val forNote = groupStore.find(alertId) != null
+            if (storeClip(alertId, temp, fromEndpoint)) {
+                if (forAlert) onAlertsChanged()
+                if (forNote) onGroupsChanged()
+            } else if (temp.exists()) {
                 synchronized(clipLock) { completedFiles[payloadId] = temp }
             }
         }
@@ -267,12 +378,18 @@ class NearbyRelay(
         ClipRelay.deletePending(clipsDir, keep)
     }
 
-    private fun storeClip(alertId: String, source: File, fromEndpoint: String?): Boolean {
+    private fun storeClip(ownerId: String, source: File, fromEndpoint: String?): Boolean {
         if (!source.exists()) return false
-        if (source.length() !in 45..MAX_CLIP_BYTES) {
+        if (!ClipGate.acceptLength(source.length())) {
             discardPending(source)
             return false
         }
+        if (store.find(ownerId) != null) return storeAlertClip(ownerId, source, fromEndpoint)
+        if (groupStore.find(ownerId) != null) return storeNoteClip(ownerId, source, fromEndpoint)
+        return false
+    }
+
+    private fun storeAlertClip(alertId: String, source: File, fromEndpoint: String?): Boolean {
         val current = store.find(alertId) ?: return false
         val existing = current.audioPath
         if (existing != null && File(existing).let { it.exists() && it.length() > WavPcm.HEADER_BYTES }) {
@@ -288,6 +405,22 @@ class NearbyRelay(
         return true
     }
 
+    private fun storeNoteClip(noteId: String, source: File, fromEndpoint: String?): Boolean {
+        val current = groupStore.find(noteId) ?: return false
+        val existing = current.audioPath
+        if (existing != null && File(existing).let { it.exists() && it.length() > WavPcm.HEADER_BYTES }) {
+            discardPending(source)
+            return false
+        }
+        val dest = WavPcm.clipFile(clipsDir, noteId)
+        if (!copyClip(source, dest)) return false
+        discardPending(source)
+        groupStore.attachAudio(noteId, dest.absolutePath)
+        val updated = groupStore.find(noteId) ?: return true
+        sendNotes(listOf(updated), exceptEndpoint = fromEndpoint, forceClips = true)
+        return true
+    }
+
     private fun discardPending(source: File) {
         if (!ClipRelay.isPendingWav(source)) return
         if (!source.delete()) Log.w(TAG, "could not delete ${source.name}")
@@ -297,7 +430,7 @@ class NearbyRelay(
         return try {
             dest.parentFile?.mkdirs()
             source.copyTo(dest, overwrite = true)
-            dest.length() in 45..MAX_CLIP_BYTES
+            ClipGate.acceptLength(dest.length())
         } catch (error: Exception) {
             Log.w(TAG, "clip copy failed", error)
             false
@@ -316,7 +449,15 @@ class NearbyRelay(
         }
 
         override fun onPayloadTransferUpdate(endpointId: String, update: PayloadTransferUpdate) {
-            if (update.status != PayloadTransferUpdate.Status.SUCCESS) return
+            val status = update.status
+            if (
+                status == PayloadTransferUpdate.Status.SUCCESS ||
+                status == PayloadTransferUpdate.Status.FAILURE ||
+                status == PayloadTransferUpdate.Status.CANCELED
+            ) {
+                synchronized(clipLock) { outgoingClips.remove(update.payloadId) }
+            }
+            if (status != PayloadTransferUpdate.Status.SUCCESS) return
             val payloadId = update.payloadId
             io.execute { handleFileSuccess(payloadId, endpointId) }
         }
@@ -339,6 +480,7 @@ class NearbyRelay(
                 endpoints.markConnected(endpointId, "Nearby phone", System.currentTimeMillis())
                 publish("Connected to a nearby phone")
                 send(store.snapshot(), exceptEndpoint = null, forceClips = false)
+                sendNotes(groupStore.relayable(), exceptEndpoint = null, forceClips = false)
             } else {
                 endpoints.markConnectFailed(endpointId)
                 Log.w(TAG, "connection failed ${result.status}")
@@ -372,6 +514,19 @@ class NearbyRelay(
         private const val TAG = "SakloloRelay"
         const val SERVICE_ID = "ph.appbuilders.saklolo.relay"
         private const val MAX_PAYLOAD = 32 * 1024
-        private const val MAX_CLIP_BYTES = 1_000_000
     }
 }
+
+private data class OutClip(
+    val endpointId: String,
+    val payloadId: Long,
+    val ownerId: String,
+    val file: File,
+    val note: Boolean,
+)
+
+private data class ReadyClip(
+    val ownerId: String,
+    val payload: Payload,
+    val file: File,
+)

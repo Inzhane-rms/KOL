@@ -50,13 +50,17 @@ object TriageEngine {
     )
 
     private val trappedWords = setOf(
-        "naipit", "naiipit", "ipit", "napiit", "nakulong", "nakakulong", "trapped", "stuck", "buried", "pinned",
+        "naipit", "naiipit", "napiit", "nakulong", "nakakulong", "trapped", "stuck", "buried", "pinned", "nadaganan",
     )
 
     private val injuredWords = setOf(
         "nasugatan", "sugatan", "sugat", "nasamdan", "samdan", "injured", "bleeding",
-        "dumudugo", "nagdudugo", "dumugo", "nagdugo", "unconscious", "nahimatay", "himalatyon", "injury", "injuries",
+        "dumudugo", "nagdudugo", "dumugo", "nagdugo", "unconscious", "nahimatay", "hinimatay", "himalatyon",
+        "injury", "injuries",
     )
+
+    /** Packed crowd or dizziness. Help, not critical, unless a critical phrase is also present. */
+    private val crowdWords = setOf("siksikan", "nagsisiksikan", "dinumog", "nahilo")
 
     private val fireWords = setOf("sunog", "nasusunog", "nagdilaab", "fire", "apoy")
     private val drownWords = setOf("nalulunod", "nalunod", "nalumos", "drowning")
@@ -101,6 +105,11 @@ object TriageEngine {
         listOf("walang", "malay"),
         listOf("heart", "attack"),
         listOf("atake", "sa", "puso"),
+        listOf("crowd", "crush"),
+    )
+    /** "ipit na ipit" is crowded, like siksikan. Bare "ipit" is a hair clip, not a pin. */
+    private val crowdPhrases = listOf(
+        listOf("ipit", "na", "ipit"),
     )
     private val safePhrases = listOf(
         listOf("no", "help", "needed"),
@@ -137,7 +146,8 @@ object TriageEngine {
             hasWordsBetween(tokens, "di", "humihinga", maxBetween = 2)
         val severe = hasUnnegated(tokens, severeWords) || hasPhrase(tokens, severePhrases) || notBreathing
         val flood = hasUnnegated(tokens, floodWords)
-        val help = hasUnnegated(tokens, helpWords) || flood || negatedSafe(tokens)
+        val crowd = hasUnnegated(tokens, crowdWords) || hasPhrase(tokens, crowdPhrases)
+        val help = hasUnnegated(tokens, helpWords) || flood || negatedSafe(tokens) || crowd
         val safe = affirmativeSafe(tokens)
         val critical = trapped || injured || fire || drowning || severe
 

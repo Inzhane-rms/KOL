@@ -28,6 +28,8 @@ val Hairline = Color(0xFFE3E6EC)
 val PillAmberBg = Color(0xFFFEF3C7)
 val PillAmberText = Color(0xFF92400E)
 val NearSecondary = Color(0xFFA6ABB8)
+/** Status pill only. The rest of the light v14 theme stays as it is. */
+val OfflineCyan = Color(0xFF22D3EE)
 val ShadowInk = Color(0xFF5A6075)
 val ChipWash = Color(0xFFF1F2F6)
 val PlayerWash = Color(0xFFF4F5F8)

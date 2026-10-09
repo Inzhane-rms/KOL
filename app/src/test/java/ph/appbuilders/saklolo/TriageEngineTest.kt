@@ -110,10 +110,56 @@ class TriageEngineTest {
     }
 
     @Test
-    fun ipitIsCritical() {
-        val result = TriageEngine.triage("Ipit ang pinto")
+    fun naipitIsCritical() {
+        val result = TriageEngine.triage("Naipit ang kamay ko")
         assertEquals(Urgency.CRITICAL, result.urgency)
         assertTrue(result.summary.contains("trapped"))
+    }
+
+    @Test
+    fun bareIpitIsNotCritical() {
+        val hair = TriageEngine.triage("ipit sa buhok")
+        val door = TriageEngine.triage("Ipit ang pinto")
+        assertEquals(Urgency.NEEDS_HELP, hair.urgency)
+        assertEquals(Urgency.NEEDS_HELP, door.urgency)
+    }
+
+    @Test
+    fun ipitNaIpitAloneNeedsHelp() {
+        val result = TriageEngine.triage("ipit na ipit dito")
+        assertEquals(Urgency.NEEDS_HELP, result.urgency)
+    }
+
+    @Test
+    fun ipitNaIpitWithHindiMakahingaIsCritical() {
+        val result = TriageEngine.triage("ipit na ipit, hindi makahinga")
+        assertEquals(Urgency.CRITICAL, result.urgency)
+    }
+
+    @Test
+    fun ipitNaIpitWithNahimatayIsCritical() {
+        assertEquals(Urgency.CRITICAL, TriageEngine.triage("ipit na ipit at nahimatay").urgency)
+    }
+
+    @Test
+    fun siksikanAloneIsNotCritical() {
+        assertEquals(Urgency.NEEDS_HELP, TriageEngine.triage("ang siksikan dito!").urgency)
+        assertEquals(Urgency.NEEDS_HELP, TriageEngine.triage("nagsisiksikan").urgency)
+        assertEquals(Urgency.NEEDS_HELP, TriageEngine.triage("dinumog kami").urgency)
+        assertEquals(Urgency.NEEDS_HELP, TriageEngine.triage("nahilo ako").urgency)
+    }
+
+    @Test
+    fun crushAloneIsNotCritical() {
+        assertEquals(Urgency.NEEDS_HELP, TriageEngine.triage("my crush is here").urgency)
+        assertEquals(Urgency.CRITICAL, TriageEngine.triage("crowd crush sa harap").urgency)
+    }
+
+    @Test
+    fun nadagananAndHinimatayAreCritical() {
+        assertEquals(Urgency.CRITICAL, TriageEngine.triage("nadaganan siya").urgency)
+        assertEquals(Urgency.CRITICAL, TriageEngine.triage("hinimatay si Ana").urgency)
+        assertEquals(Urgency.CRITICAL, TriageEngine.triage("ang siksikan at nahimatay").urgency)
     }
 
     @Test

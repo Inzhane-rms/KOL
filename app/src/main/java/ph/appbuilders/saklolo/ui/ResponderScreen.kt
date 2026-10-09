@@ -97,8 +97,9 @@ fun ResponderScreen(
             .padding(bottom = 150.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
-            Text("Alerts", color = Ink, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+        OfflineAiPillRow()
+        Column(Modifier.fillMaxWidth()) {
+            Text("Medic", color = Ink, fontSize = 26.sp, fontWeight = FontWeight.Bold)
             Text(
                 "${alerts.size} near you · sorted by urgency",
                 color = InkSoft,

@@ -15,6 +15,12 @@ class DemoSettings(context: Context) {
             prefs.edit().putString(KEY_NAME, value.trim().ifEmpty { "B-LINK" }).apply()
         }
 
+    var displayName: String
+        get() = prefs.getString(KEY_DISPLAY, null)?.trim()?.takeIf { it.isNotEmpty() } ?: "Me"
+        set(value) {
+            prefs.edit().putString(KEY_DISPLAY, value.trim().ifEmpty { "Me" }).apply()
+        }
+
     var restrictPeers: Boolean
         get() = prefs.getBoolean(KEY_RESTRICT, false)
         set(value) {
@@ -39,6 +45,7 @@ class DemoSettings(context: Context) {
 
     companion object {
         private const val KEY_NAME = "name"
+        private const val KEY_DISPLAY = "display_name"
         private const val KEY_RESTRICT = "restrict"
         private const val KEY_ALLOW = "allow"
         private const val KEY_LANG = "lang"

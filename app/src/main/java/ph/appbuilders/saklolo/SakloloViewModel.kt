@@ -19,6 +19,11 @@ import ph.appbuilders.saklolo.ask.AskEngine
 import ph.appbuilders.saklolo.ask.AskResult
 import ph.appbuilders.saklolo.ask.AskTurn
 import ph.appbuilders.saklolo.audio.WavPcm
+import ph.appbuilders.saklolo.group.ConcertGroup
+import ph.appbuilders.saklolo.group.GroupNote
+import ph.appbuilders.saklolo.group.GroupQr
+import ph.appbuilders.saklolo.group.GroupTriage
+import ph.appbuilders.saklolo.group.Sighting
 import ph.appbuilders.saklolo.location.DeviceLocation
 import ph.appbuilders.saklolo.model.Alert
 import ph.appbuilders.saklolo.relay.NearbyPeer
@@ -53,6 +58,12 @@ data class SosUiState(
     val canUndo: Boolean = false,
 )
 
+data class VoiceUiState(
+    val recording: Boolean = false,
+    val elapsedSec: Int = 0,
+    val status: String = "",
+)
+
 data class DemoConfig(
     val deviceName: String,
     val restrictPeers: Boolean,
@@ -77,8 +88,15 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     private var player: MediaPlayer? = null
 
     val alerts: StateFlow<List<Alert>> = runtime.alerts
+    val groups: StateFlow<List<ConcertGroup>> = runtime.groups
+    val groupNotes: StateFlow<List<GroupNote>> = runtime.groupNotes
+    val sightings: StateFlow<List<Sighting>> = runtime.sightings
+    val activeGroup: StateFlow<ConcertGroup?> = runtime.activeGroup
     val peers: StateFlow<List<NearbyPeer>> = runtime.peers
     val relayMessage: StateFlow<String> = runtime.relayMessage
+
+    private val _voice = MutableStateFlow(VoiceUiState())
+    val voice: StateFlow<VoiceUiState> = _voice.asStateFlow()
 
     private val _askTurns = MutableStateFlow<List<AskTurn>>(emptyList())
     val askTurns: StateFlow<List<AskTurn>> = _askTurns.asStateFlow()
@@ -196,7 +214,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun startRecording() {
-        if (_sos.value.recording) return
+        if (_sos.value.recording || _voice.value.recording) return
         if (!_sos.value.modelReady) {
             _sos.update { it.copy(error = "The speech model is not ready yet.") }
             return
@@ -459,10 +477,156 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         runtime.refreshAlerts()
     }
 
+    fun displayName(): String = runtime.settings.displayName
+
+    fun setDisplayName(name: String) {
+        runtime.settings.displayName = name
+    }
+
+    fun createGroup(name: String): String? {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return null
+        val id = GroupQr.newId()
+        runtime.groupStore.join(id, trimmed, System.currentTimeMillis())
+        runtime.refreshGroups()
+        return GroupQr.encode(id, trimmed)
+    }
+
+    fun selectGroup(id: String) {
+        runtime.groupStore.setActive(id)
+        runtime.refreshGroups()
+    }
+
+    fun sendGroupText(body: String) {
+        val trimmed = body.trim()
+        val group = runtime.groupStore.active() ?: return
+        if (trimmed.isEmpty()) return
+        val location = DeviceLocation.lastKnown(getApplication())
+        val note = GroupNote(
+            id = java.util.UUID.randomUUID().toString(),
+            groupId = group.id,
+            sender = runtime.settings.displayName,
+            body = trimmed.take(800),
+            createdAtMillis = System.currentTimeMillis(),
+            lat = location?.first,
+            lon = location?.second,
+            urgency = GroupTriage.label(trimmed),
+        )
+        runtime.groupStore.addLocal(note)
+        runtime.relay.broadcastNote(note)
+        runtime.refreshGroups()
+    }
+
+    fun startVoiceNote() {
+        if (runtime.groupStore.groups().isEmpty()) return
+        if (_sos.value.recording || _voice.value.recording) return
+        if (!_sos.value.modelReady) {
+            _voice.update { it.copy(status = "The speech model is not ready yet.") }
+            return
+        }
+        val failure = recorder.start()
+        if (failure != null) {
+            _voice.update { it.copy(status = failure) }
+            return
+        }
+        heldPcm = null
+        undoGeneration += 1
+        recordingStartedAt = System.currentTimeMillis()
+        recordGeneration += 1
+        val generation = recordGeneration
+        _voice.update { it.copy(recording = true, elapsedSec = 0, status = "Listening…") }
+        viewModelScope.launch {
+            while (recorder.isRunning && _voice.value.recording && generation == recordGeneration) {
+                delay(250)
+                if (generation != recordGeneration) return@launch
+                val elapsed = ((System.currentTimeMillis() - recordingStartedAt) / 1000).toInt()
+                _voice.update { it.copy(elapsedSec = elapsed) }
+                if (generation == recordGeneration && (elapsed >= PcmRecorder.MAX_SECONDS || !recorder.isRunning)) {
+                    stopVoiceNote()
+                    break
+                }
+            }
+        }
+    }
+
+    fun stopVoiceNote() {
+        viewModelScope.launch {
+            if (!recordGate.tryLock()) return@launch
+            try {
+                if (!_voice.value.recording && !recorder.isRunning) return@launch
+                runtime.relay.onLocalRecordingFinished()
+                _voice.update { it.copy(recording = false, status = "Transcribing on this phone…") }
+                finishVoice(recorder.stop())
+            } catch (error: Exception) {
+                _voice.update { it.copy(recording = false, status = error.message ?: "Transcription failed") }
+            } finally {
+                recordGate.unlock()
+            }
+        }
+    }
+
+    private suspend fun finishVoice(pcm: FloatArray) {
+        if (pcm.size < PcmRecorder.SAMPLE_RATE / 2) {
+            _voice.update { it.copy(status = "Recording was too short") }
+            return
+        }
+        val engine = transcriber ?: run {
+            _voice.update { it.copy(status = "The speech model is not ready yet.") }
+            return
+        }
+        val text = withContext(Dispatchers.Default) {
+            engine.transcribe(pcm, _sos.value.language.whisperCode)
+        }
+        if (text.isBlank()) {
+            _voice.update { it.copy(status = "No speech recognized") }
+            return
+        }
+        val group = runtime.groupStore.active() ?: return
+        val location = DeviceLocation.lastKnown(getApplication())
+        val id = java.util.UUID.randomUUID().toString()
+        val audioPath = run {
+            val file = WavPcm.clipFile(runtime.clipsDir, id)
+            WavPcm.write(file, pcm)
+            if (file.exists() && file.length() > WavPcm.HEADER_BYTES) file.absolutePath else null
+        }
+        val note = GroupNote(
+            id = id,
+            groupId = group.id,
+            sender = runtime.settings.displayName,
+            body = text.trim().take(800),
+            createdAtMillis = System.currentTimeMillis(),
+            audioPath = audioPath,
+            lat = location?.first,
+            lon = location?.second,
+            urgency = GroupTriage.labelVoice(text),
+        )
+        runtime.groupStore.addLocal(note)
+        runtime.relay.broadcastNote(note)
+        runtime.refreshGroups()
+        _voice.update { it.copy(status = "Voice note sent") }
+    }
+
+    fun sendNoteToMedics(noteId: String) {
+        val note = runtime.groupStore.find(noteId) ?: return
+        val alert = GroupTriage.sendToMedics(note, System.currentTimeMillis())
+        store.addLocal(alert)
+        val delivered = relay.broadcast(alert)
+        store.markDelivered(alert.id, delivered)
+        runtime.refreshAlerts()
+        _notice.value = "Sent to medics"
+    }
+
     fun ingestQr(payload: String) {
+        val group = GroupQr.decode(payload)
+        if (group != null) {
+            runtime.groupStore.join(group.id, group.name, System.currentTimeMillis())
+            runtime.refreshGroups()
+            _notice.value = "Joined ${group.name}"
+            return
+        }
         val alert = QrCodec.decode(payload)
         if (alert == null) {
-            _notice.value = "That QR is not a B-LINK alert"
+            _notice.value = "That QR is not a B-LINK code"
             return
         }
         val fresh = store.ingest(listOf(alert))

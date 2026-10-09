@@ -47,6 +47,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import ph.appbuilders.saklolo.SakloloViewModel
+import ph.appbuilders.saklolo.group.recordIntent
+import ph.appbuilders.saklolo.group.RecordIntent
 import ph.appbuilders.saklolo.model.Alert
 import ph.appbuilders.saklolo.relay.RelayPermissions
 import ph.appbuilders.saklolo.relay.RelayService
@@ -54,6 +56,8 @@ import ph.appbuilders.saklolo.triage.Urgency
 import ph.appbuilders.saklolo.ui.theme.Ink
 import ph.appbuilders.saklolo.ui.theme.Page
 
+private const val HOME = "home"
+private const val CHAT = "chat"
 private const val RECORD = "record"
 private const val ASK = "ask"
 private const val FEED = "feed"
@@ -62,14 +66,20 @@ private const val FEED = "feed"
 fun SakloloApp(viewModel: SakloloViewModel) {
     val sos by viewModel.sos.collectAsStateWithLifecycle()
     val alerts by viewModel.alerts.collectAsStateWithLifecycle()
+    val groups by viewModel.groups.collectAsStateWithLifecycle()
+    val groupNotes by viewModel.groupNotes.collectAsStateWithLifecycle()
+    val sightings by viewModel.sightings.collectAsStateWithLifecycle()
+    val activeGroup by viewModel.activeGroup.collectAsStateWithLifecycle()
+    val voice by viewModel.voice.collectAsStateWithLifecycle()
     val askTurns by viewModel.askTurns.collectAsStateWithLifecycle()
     val peers by viewModel.peers.collectAsStateWithLifecycle()
     val notice by viewModel.notice.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    var route by remember { mutableStateOf(RECORD) }
+    var route by remember { mutableStateOf(HOME) }
     var settingsOpen by remember { mutableStateOf(false) }
     var qrAlert by remember { mutableStateOf<Alert?>(null) }
+    var groupQr by remember { mutableStateOf<Pair<String, String>?>(null) }
     var askedBattery by remember { mutableStateOf(false) }
     var askedMic by remember { mutableStateOf(false) }
     var micBlocked by remember { mutableStateOf(false) }
@@ -152,6 +162,18 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                 onAsk = viewModel::submitAsk,
                 onOpenRecorder = { route = RECORD },
             )
+        } else if (route == CHAT) {
+            GroupChatScreen(
+                group = activeGroup,
+                notes = groupNotes,
+                voice = voice,
+                notice = notice,
+                onSend = viewModel::sendGroupText,
+                onSendToMedics = viewModel::sendNoteToMedics,
+                onOpenHome = { route = HOME },
+                onOpenSos = { route = RECORD },
+                onDismissNotice = viewModel::clearNotice,
+            )
         } else if (route == RECORD) {
             SosScreen(
                 state = sos,
@@ -186,7 +208,7 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                 locationWarning = locationWarning,
                 onOpenAppSettings = { openAppSettings(context) },
             )
-        } else {
+        } else if (route == FEED) {
             ResponderScreen(
                 alerts = alerts,
                 notice = notice,
@@ -204,11 +226,55 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                 onDismissNotice = viewModel::clearNotice,
                 onMarkResponding = viewModel::markResponding,
             )
+        } else {
+            GroupHomeScreen(
+                groups = groups,
+                active = activeGroup,
+                sightings = sightings,
+                displayName = viewModel.displayName(),
+                notice = notice,
+                onDisplayName = viewModel::setDisplayName,
+                onCreate = { name ->
+                    val payload = viewModel.createGroup(name)
+                    if (payload != null) groupQr = name.trim() to payload
+                },
+                onSelect = viewModel::selectGroup,
+                onScan = {
+                    if (hasPermission(context, Manifest.permission.CAMERA)) {
+                        scanner.launch(scanOptions())
+                    } else {
+                        permissions.launch(requiredPermissions())
+                    }
+                },
+                onOpenChat = { route = CHAT },
+                onOpenSos = { route = RECORD },
+                onDismissNotice = viewModel::clearNotice,
+            )
         }
         BottomSwitcher(
-            route = route,
+            route = if (route == HOME || route == CHAT) RECORD else route,
             alertBadge = unrespondedCritical,
-            onRecord = { route = RECORD },
+            onRecord = {
+                when (recordIntent(groups.size)) {
+                    RecordIntent.OpenQrJoin -> route = HOME
+                    RecordIntent.RecordVoice -> {
+                        if (route != CHAT) {
+                            route = CHAT
+                        } else if (voice.recording) {
+                            viewModel.stopVoiceNote()
+                        } else if (hasPermission(context, Manifest.permission.RECORD_AUDIO)) {
+                            micGranted = true
+                            micBlocked = false
+                            viewModel.startVoiceNote()
+                        } else if (micIsPermanentlyDenied(context)) {
+                            askedMic = true
+                            micBlocked = true
+                        } else {
+                            permissions.launch(requiredPermissions())
+                        }
+                    }
+                }
+            },
             onAsk = { route = ASK },
             onFeed = { route = FEED },
             modifier = Modifier.align(Alignment.BottomCenter),
@@ -227,6 +293,9 @@ fun SakloloApp(viewModel: SakloloViewModel) {
     }
     qrAlert?.let { alert ->
         QrDialog(alert = alert, payload = viewModel.qrText(alert), onDismiss = { qrAlert = null })
+    }
+    groupQr?.let { (name, payload) ->
+        GroupQrDialog(name = name, payload = payload, onDismiss = { groupQr = null })
     }
 }
 

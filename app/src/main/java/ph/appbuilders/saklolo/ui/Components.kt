@@ -365,7 +365,7 @@ fun BottomSwitcher(
                 .background(Color.White),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            NavSide("Alerts", Icons.Filled.Notifications, route == "feed", alertBadge, Modifier.weight(1f), onFeed)
+            NavSide("Medic", Icons.Filled.Notifications, route == "feed", alertBadge, Modifier.weight(1f), onFeed)
             Box(Modifier.size(width = 88.dp, height = 64.dp))
             NavSide("Ask", Icons.Filled.ChatBubble, route == "ask", 0, Modifier.weight(1f), onAsk)
         }

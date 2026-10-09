@@ -32,15 +32,29 @@ data class ClipLink(
 )
 
 @Serializable
+data class WireNote(
+    val id: String,
+    val groupId: String,
+    val sender: String,
+    val body: String,
+    val createdAtMillis: Long,
+    val hops: Int = 0,
+    val lat: Double? = null,
+    val lon: Double? = null,
+)
+
+@Serializable
 data class AlertEnvelope(
     val v: Int = 2,
     val alerts: List<WireAlert> = emptyList(),
     val clips: List<ClipLink> = emptyList(),
+    val notes: List<WireNote> = emptyList(),
 )
 
 data class RelayPacket(
     val alerts: List<Alert> = emptyList(),
     val clips: List<ClipLink> = emptyList(),
+    val notes: List<WireNote> = emptyList(),
 )
 
 @Serializable
@@ -50,14 +64,20 @@ data class AlertFile(
 )
 
 object AlertJson {
-    fun encodeEnvelope(alerts: List<Alert>, clips: List<ClipLink> = emptyList()): String =
-        json.encodeToString(AlertEnvelope(alerts = alerts.map { it.toWire() }, clips = clips))
+    fun encodeEnvelope(
+        alerts: List<Alert>,
+        clips: List<ClipLink> = emptyList(),
+        notes: List<WireNote> = emptyList(),
+    ): String = json.encodeToString(
+        AlertEnvelope(alerts = alerts.map { it.toWire() }, clips = clips, notes = notes),
+    )
 
     fun decodeEnvelope(payload: String): RelayPacket {
         val envelope = json.decodeFromString(AlertEnvelope.serializer(), payload)
         return RelayPacket(
             alerts = envelope.alerts.map { it.toAlert() },
             clips = envelope.clips,
+            notes = envelope.notes,
         )
     }
 
