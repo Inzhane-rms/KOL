@@ -83,7 +83,7 @@ class NearbyRelay(
     }
 
     fun start(name: String) {
-        Log.i(BLINK, "relay start name=$name service=$SERVICE_ID")
+        Log.i(BLINK, "relay start service=$SERVICE_ID")
         when (endpoints.beginSession(name)) {
             RelayEndpoints.SessionStart.UNCHANGED -> {
                 if (!advertisingOk) beginAdvertising()
@@ -152,7 +152,7 @@ class NearbyRelay(
         val peers = endpoints.snapshot(null)
         enqueue(live = true) {
             val withClip = !message.audioPath.isNullOrBlank()
-            Log.i(BLINK, "send type=${message.kind} id=${message.id} to=${message.toDeviceId} endpoints=${peers.size} clips=$withClip")
+            Log.i(BLINK, "send type=${message.kind} id=${message.id} endpoints=${peers.size} clips=$withClip")
             for (job in ResyncPlan.live(peers.map { it.endpointId }, message, withClip)) {
                 deliverDirect(job.endpointId, job.messages, job.attachClips)
             }
@@ -701,7 +701,7 @@ class NearbyRelay(
     private val connectionCallback = object : ConnectionLifecycleCallback() {
         override fun onConnectionInitiated(endpointId: String, info: ConnectionInfo) {
             val name = info.endpointName.orEmpty()
-            Log.i(BLINK, "connection initiated id=$endpointId name=$name")
+            Log.i(BLINK, "connection initiated id=$endpointId")
             endpoints.rememberName(endpointId, name)
             if (!endpoints.allows(name)) {
                 client.rejectConnection(endpointId)
@@ -719,7 +719,7 @@ class NearbyRelay(
                 endpoints.markConnected(endpointId, "Nearby phone", System.currentTimeMillis())
                 val peerName = endpoints.snapshot().firstOrNull { it.endpointId == endpointId }?.name
                 val card = EndpointCard.decode(peerName)
-                Log.i(BLINK, "join endpoint=$endpointId name=$peerName parsed=${card != null}")
+                Log.i(BLINK, "join endpoint=$endpointId parsed=${card != null}")
                 if (card != null) {
                     directStore.notePeer(card.deviceId, card.name, System.currentTimeMillis())
                 }
@@ -749,7 +749,7 @@ class NearbyRelay(
     private val discoveryCallback = object : EndpointDiscoveryCallback() {
         override fun onEndpointFound(endpointId: String, info: DiscoveredEndpointInfo) {
             val name = info.endpointName.orEmpty()
-            Log.i(BLINK, "endpoint found id=$endpointId name=$name")
+            Log.i(BLINK, "endpoint found id=$endpointId")
             if (!endpoints.tryBeginConnect(endpointId, name)) return
             client.requestConnection(endpoints.localName(), endpointId, connectionCallback)
                 .addOnFailureListener {

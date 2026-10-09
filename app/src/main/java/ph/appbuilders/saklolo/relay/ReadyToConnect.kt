@@ -2,8 +2,9 @@ package ph.appbuilders.saklolo.relay
 
 /**
  * What must be true before Nearby advertise/discovery runs.
+ * Bluetooth, Location, and the Nearby permission are required.
+ * Nearby still works over Bluetooth alone, including airplane mode, so Wi-Fi is recommended.
  * The name prompt and notification permission do not gate the relay.
- * Wi-Fi is required because P2P_CLUSTER uses the Wi-Fi radio even with no network.
  */
 enum class SetupKey {
     BLUETOOTH,
@@ -36,11 +37,15 @@ data class SetupRow(
     val title: String,
     val required: Boolean,
     val ok: Boolean,
+    val detail: String,
     val permanentlyDenied: Boolean = false,
 )
 
 object ReadyToConnect {
     const val TITLE = "Ready to connect"
+    const val WIFI_DETAIL = "Recommended · faster, still offline"
+    const val CONTINUE = "Continue"
+    const val CONTINUE_ANYWAY = "Continue anyway"
 
     fun rows(facts: SetupFacts): List<SetupRow> = listOf(
         row(SetupKey.BLUETOOTH, "Bluetooth on", required = true, ok = facts.bluetoothOn),
@@ -52,7 +57,7 @@ object ReadyToConnect {
             ok = facts.nearbyPermission,
             permanentlyDenied = facts.nearbyDenied,
         ),
-        row(SetupKey.WIFI, "Wi-Fi on", required = true, ok = facts.wifiOn),
+        row(SetupKey.WIFI, "Wi-Fi on", required = false, ok = facts.wifiOn),
         row(
             SetupKey.MICROPHONE,
             "Microphone",
@@ -79,7 +84,7 @@ object ReadyToConnect {
 
     fun requiredMissing(facts: SetupFacts): Int = rows(facts).count { it.required && !it.ok }
 
-    /** Radios and Nearby permission only. Name and notifications are ignored. */
+    /** Bluetooth, Location, and Nearby permission. Wi-Fi, name, and notifications are ignored. */
     fun shouldStart(facts: SetupFacts): Boolean = requiredMissing(facts) == 0
 
     fun show(seen: Boolean, requiredMissing: Int, pillTapped: Boolean): Boolean =
@@ -101,5 +106,12 @@ object ReadyToConnect {
         required: Boolean,
         ok: Boolean,
         permanentlyDenied: Boolean = false,
-    ) = SetupRow(key, title, required, ok, permanentlyDenied && !ok)
+    ): SetupRow {
+        val detail = when {
+            key == SetupKey.WIFI -> WIFI_DETAIL
+            required -> "Required"
+            else -> "Recommended"
+        }
+        return SetupRow(key, title, required, ok, detail, permanentlyDenied && !ok)
+    }
 }

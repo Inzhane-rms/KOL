@@ -34,8 +34,11 @@ class V0112BlockerTest {
         assertTrue(ReadyToConnect.permissionLine(locationOff).contains("location=0"))
 
         val wifiOff = ready.copy(wifiOn = false, microphone = false, camera = false, batteryUnrestricted = false)
-        assertFalse(ReadyToConnect.shouldStart(wifiOff))
-        assertEquals(1, ReadyToConnect.requiredMissing(wifiOff))
+        assertTrue(ReadyToConnect.shouldStart(wifiOff))
+        assertEquals(0, ReadyToConnect.requiredMissing(wifiOff))
+        val wifi = ReadyToConnect.rows(wifiOff).first { it.key == SetupKey.WIFI }
+        assertFalse(wifi.required)
+        assertEquals(ReadyToConnect.WIFI_DETAIL, wifi.detail)
     }
 
     @Test
@@ -47,9 +50,10 @@ class V0112BlockerTest {
 
         val required = ReadyToConnect.rows(facts()).filter { it.required }.map { it.key }
         assertEquals(
-            listOf(SetupKey.BLUETOOTH, SetupKey.LOCATION, SetupKey.NEARBY, SetupKey.WIFI),
+            listOf(SetupKey.BLUETOOTH, SetupKey.LOCATION, SetupKey.NEARBY),
             required,
         )
+        assertTrue(SetupKey.WIFI in ReadyToConnect.rows(facts()).filter { !it.required }.map { it.key })
         val recommended = ReadyToConnect.rows(facts().copy(microphone = false, notifications = false))
             .filter { !it.required && !it.ok }
             .map { it.key }

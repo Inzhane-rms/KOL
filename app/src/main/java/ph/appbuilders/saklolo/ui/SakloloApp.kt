@@ -198,7 +198,6 @@ fun SakloloApp(viewModel: SakloloViewModel) {
     }
     BackHandler(enabled = showSetup || askName || quickCall || route != CONTACTS) {
         when {
-            showSetup && setupMissing > 0 -> Unit
             showSetup -> dismissSetup()
             askName -> Unit
             quickCall -> quickCall = false
@@ -408,9 +407,9 @@ fun SakloloApp(viewModel: SakloloViewModel) {
 
     if (showSetup) {
         Dialog(
-            onDismissRequest = { if (setupMissing == 0) dismissSetup() },
+            onDismissRequest = { dismissSetup() },
             properties = DialogProperties(
-                dismissOnBackPress = false,
+                dismissOnBackPress = true,
                 dismissOnClickOutside = false,
                 usePlatformDefaultWidth = false,
                 decorFitsSystemWindows = false,
@@ -418,6 +417,7 @@ fun SakloloApp(viewModel: SakloloViewModel) {
         ) {
             ReadyToConnectScreen(
                 rows = ReadyToConnect.rows(facts),
+                requiredReady = setupMissing == 0,
                 onFix = { key ->
                     fixSetup(
                         context,
@@ -431,11 +431,7 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                         onAskedNotifications = { askedNotifications = true },
                     )
                 },
-                onContinue = if (setupMissing == 0) {
-                    { dismissSetup() }
-                } else {
-                    null
-                },
+                onContinue = { dismissSetup() },
             )
         }
     }
@@ -489,7 +485,14 @@ private fun requiredPermissions(): Array<String> {
 }
 
 private fun startRelay(context: Context) {
-    ContextCompat.startForegroundService(context, Intent(context, RelayService::class.java))
+    try {
+        ContextCompat.startForegroundService(context, Intent(context, RelayService::class.java))
+    } catch (error: Exception) {
+        android.util.Log.i(
+            "BLINK",
+            "startForegroundService failure ${error.javaClass.simpleName} message=${error.message}",
+        )
+    }
 }
 
 private fun decorateFacts(
