@@ -25,6 +25,7 @@ import ph.appbuilders.saklolo.group.GroupQr
 import ph.appbuilders.saklolo.group.GroupTriage
 import ph.appbuilders.saklolo.group.Sighting
 import ph.appbuilders.saklolo.group.VoiceDraft
+import ph.appbuilders.saklolo.group.VoiceSheet
 import ph.appbuilders.saklolo.location.DeviceLocation
 import ph.appbuilders.saklolo.model.Alert
 import ph.appbuilders.saklolo.relay.NearbyPeer
@@ -103,6 +104,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     private var pendingVoice: GroupNote? = null
     private var sendVoiceWhenReady = false
     private var voiceEpoch = 0
+    private var voiceSession = 0
     private val _chatRead = MutableStateFlow(runtime.settings.lastChatReadMillis)
     val chatReadMillis: StateFlow<Long> = _chatRead.asStateFlow()
 
@@ -533,6 +535,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
             _voice.update { it.copy(status = "The speech model is not ready yet.") }
             return
         }
+        voiceSession += 1
         val failure = recorder.start()
         if (failure != null) {
             _voice.update { it.copy(status = failure) }
@@ -561,19 +564,22 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     fun stopVoiceNote(sendAfter: Boolean = false) {
         if (sendAfter) sendVoiceWhenReady = true
         val epoch = voiceEpoch
+        val session = voiceSession
         viewModelScope.launch {
             if (!recordGate.tryLock()) return@launch
             try {
                 if (!_voice.value.recording && !recorder.isRunning) {
-                    if (sendVoiceWhenReady && epoch == voiceEpoch) commitPendingVoice()
+                    if (sendVoiceWhenReady && epoch == voiceEpoch && session == voiceSession) commitPendingVoice()
                     return@launch
                 }
                 runtime.relay.onLocalRecordingFinished()
-                _voice.update { it.copy(recording = false, status = "Transcribing…", transcript = "") }
-                finishVoice(recorder.stop(), epoch)
+                if (session == voiceSession) {
+                    _voice.update { it.copy(recording = false, status = "Transcribing…", transcript = "") }
+                }
+                finishVoice(recorder.stop(), epoch, session)
             } catch (error: Exception) {
-                sendVoiceWhenReady = false
-                if (epoch == voiceEpoch) {
+                if (session == voiceSession) {
+                    sendVoiceWhenReady = false
                     _voice.update { it.copy(recording = false, status = error.message ?: "Transcription failed") }
                 }
             } finally {
@@ -661,8 +667,8 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private suspend fun finishVoice(pcm: FloatArray, epoch: Int) {
-        if (epoch != voiceEpoch) return
+    private suspend fun finishVoice(pcm: FloatArray, epoch: Int, session: Int) {
+        if (session != voiceSession || epoch != voiceEpoch) return
         if (pcm.size < PcmRecorder.SAMPLE_RATE / 2) {
             sendVoiceWhenReady = false
             _voice.update { it.copy(recording = false, status = "Recording was too short", transcript = "") }
@@ -673,23 +679,24 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
             _voice.update { it.copy(recording = false, status = "The speech model is not ready yet.", transcript = "") }
             return
         }
+        if (session != voiceSession) return
         _voice.update { it.copy(recording = false, status = "Transcribing…", transcript = "") }
         val text = withContext(Dispatchers.Default) {
             engine.transcribe(pcm, _sos.value.language.whisperCode)
         }
         when (val decision = VoiceDraft.decide(epoch, voiceEpoch, text)) {
             is VoiceDraft.Finish.Discarded -> {
-                sendVoiceWhenReady = false
-                pendingVoice = null
-                _voice.value = VoiceUiState()
+                discardVoiceSession(session)
                 return
             }
             is VoiceDraft.Finish.Empty -> {
+                if (session != voiceSession) return
                 sendVoiceWhenReady = false
                 _voice.update { it.copy(status = "No speech recognized", transcript = "") }
                 return
             }
             is VoiceDraft.Finish.Keep -> {
+                if (session != voiceSession) return
                 val group = runtime.groupStore.active() ?: run {
                     sendVoiceWhenReady = false
                     return
@@ -698,11 +705,11 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
                 val id = java.util.UUID.randomUUID().toString()
                 val file = WavPcm.clipFile(runtime.clipsDir, id)
                 WavPcm.write(file, pcm)
-                if (VoiceDraft.decide(epoch, voiceEpoch, decision.body) is VoiceDraft.Finish.Discarded) {
+                if (session != voiceSession ||
+                    VoiceDraft.decide(epoch, voiceEpoch, decision.body) is VoiceDraft.Finish.Discarded
+                ) {
                     file.delete()
-                    sendVoiceWhenReady = false
-                    pendingVoice = null
-                    _voice.value = VoiceUiState()
+                    discardVoiceSession(session)
                     return
                 }
                 val audioPath = if (file.exists() && file.length() > WavPcm.HEADER_BYTES) file.absolutePath else null
@@ -718,13 +725,32 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
                     urgency = GroupTriage.labelVoice(decision.body),
                     kind = "voice",
                 )
+                if (session != voiceSession) {
+                    pendingVoice = null
+                    file.delete()
+                    return
+                }
                 _voice.update { it.copy(recording = false, status = "", transcript = pendingVoice?.body.orEmpty()) }
-                if (sendVoiceWhenReady && epoch == voiceEpoch) {
+                if (sendVoiceWhenReady && epoch == voiceEpoch && session == voiceSession) {
                     sendVoiceWhenReady = false
                     commitPendingVoice()
                 }
             }
         }
+    }
+
+    private fun discardVoiceSession(session: Int) {
+        val current = VoiceSheet(
+            session = voiceSession,
+            recording = _voice.value.recording,
+            status = _voice.value.status,
+            transcript = _voice.value.transcript,
+        )
+        val next = VoiceDraft.afterDiscard(session, current)
+        if (next == current) return
+        sendVoiceWhenReady = false
+        pendingVoice = null
+        _voice.value = VoiceUiState()
     }
 
     private fun commitPendingVoice() {

@@ -156,6 +156,21 @@ class TriageEngineTest {
     }
 
     @Test
+    fun patayAboutADeviceIsNotCritical() {
+        assertEquals(Urgency.NEEDS_HELP, TriageEngine.triage("patay ang ilaw").urgency)
+        assertEquals(Urgency.NEEDS_HELP, TriageEngine.triage("patay na ang ilaw").urgency)
+        assertEquals(Urgency.NEEDS_HELP, TriageEngine.triage("patay na phone ko").urgency)
+        assertEquals(Urgency.NEEDS_HELP, TriageEngine.triage("patay na cellphone ko").urgency)
+        assertEquals(Urgency.NEEDS_HELP, TriageEngine.triage("patay na cp ko").urgency)
+        assertEquals(Urgency.NEEDS_HELP, TriageEngine.triage("patay na battery").urgency)
+        assertEquals(Urgency.NEEDS_HELP, TriageEngine.triage("patay na mic").urgency)
+        assertEquals(Urgency.NEEDS_HELP, TriageEngine.triage("patay na ang kuryente").urgency)
+        assertEquals(Urgency.CRITICAL, TriageEngine.triage("patay na siya").urgency)
+        assertEquals(Urgency.CRITICAL, TriageEngine.triage("namatay").urgency)
+        assertEquals(Urgency.CRITICAL, TriageEngine.triage("hindi na humihinga").urgency)
+    }
+
+    @Test
     fun patayAloneIsNotCriticalButPatayNaAndNamatayAre() {
         assertEquals(Urgency.NEEDS_HELP, TriageEngine.triage("patay").urgency)
         assertEquals(Urgency.NEEDS_HELP, TriageEngine.triage("may patay").urgency)

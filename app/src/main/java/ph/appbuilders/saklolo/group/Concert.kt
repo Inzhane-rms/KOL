@@ -210,12 +210,28 @@ object NoteRelay {
  * A voice note is kept only when cancel did not move the epoch while Whisper ran.
  * A moved epoch means the clip is discarded and the transcript is ignored.
  */
+data class VoiceSheet(
+    val session: Int,
+    val recording: Boolean,
+    val status: String = "",
+    val transcript: String = "",
+)
+
 object VoiceDraft {
     fun decide(startedEpoch: Int, currentEpoch: Int, transcript: String): Finish {
         if (startedEpoch != currentEpoch) return Finish.Discarded
         val body = transcript.trim()
         if (body.isEmpty()) return Finish.Empty
         return Finish.Keep(body)
+    }
+
+    /**
+     * A discarded transcript may clear the sheet only for its own session.
+     * A newer recording keeps the mic state so the sheet stays up.
+     */
+    fun afterDiscard(ownerSession: Int, current: VoiceSheet): VoiceSheet {
+        if (ownerSession != current.session) return current
+        return VoiceSheet(session = current.session, recording = false, status = "", transcript = "")
     }
 
     sealed class Finish {

@@ -14,6 +14,7 @@ import ph.appbuilders.saklolo.group.GroupStore
 import ph.appbuilders.saklolo.group.GroupTriage
 import ph.appbuilders.saklolo.group.NoteRelay
 import ph.appbuilders.saklolo.group.VoiceDraft
+import ph.appbuilders.saklolo.group.VoiceSheet
 import ph.appbuilders.saklolo.group.MemoryGroupPersistence
 import ph.appbuilders.saklolo.group.PieceKind
 import ph.appbuilders.saklolo.group.RecordIntent
@@ -155,6 +156,19 @@ class ConcertLogicTest {
         val kept = VoiceDraft.decide(startedEpoch = 4, currentEpoch = 4, transcript = "  Nasa gate ako  ")
         assertEquals("Nasa gate ako", (kept as VoiceDraft.Finish.Keep).body)
         assertTrue(VoiceDraft.decide(4, 4, "   ") is VoiceDraft.Finish.Empty)
+    }
+
+    @Test
+    fun discardedTranscriptLeavesANewerRecordingOnTheMic() {
+        val newer = VoiceSheet(session = 2, recording = true, status = "", transcript = "")
+        assertEquals(newer, VoiceDraft.afterDiscard(ownerSession = 1, current = newer))
+        assertTrue(newer.recording)
+
+        val transcribing = VoiceSheet(session = 1, recording = false, status = "Transcribing…", transcript = "")
+        val cleared = VoiceDraft.afterDiscard(ownerSession = 1, current = transcribing)
+        assertFalse(cleared.recording)
+        assertEquals("", cleared.status)
+        assertEquals("", cleared.transcript)
     }
 
     private fun note(groupId: String, body: String) = GroupNote(

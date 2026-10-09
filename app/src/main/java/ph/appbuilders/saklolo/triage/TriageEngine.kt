@@ -108,6 +108,10 @@ object TriageEngine {
         listOf("crowd", "crush"),
         listOf("patay", "na"),
     )
+    /** A dead light, power, phone, or mic. Not a person. */
+    private val patayDeviceWords = setOf(
+        "ilaw", "kuryente", "phone", "cellphone", "cp", "battery", "mic",
+    )
     /** "ipit na ipit" is crowded, like siksikan. Bare "ipit" is a hair clip, not a pin. */
     private val crowdPhrases = listOf(
         listOf("ipit", "na", "ipit"),
@@ -145,7 +149,12 @@ object TriageEngine {
         val drowning = hasUnnegated(tokens, drownWords)
         val notBreathing = hasWordsBetween(tokens, "hindi", "humihinga", maxBetween = 2) ||
             hasWordsBetween(tokens, "di", "humihinga", maxBetween = 2)
-        val severe = hasUnnegated(tokens, severeWords) || hasPhrase(tokens, severePhrases) || notBreathing
+        val deathPhrases = if (patayRefersToDevice(tokens)) {
+            severePhrases.filter { it != listOf("patay", "na") }
+        } else {
+            severePhrases
+        }
+        val severe = hasUnnegated(tokens, severeWords) || hasPhrase(tokens, deathPhrases) || notBreathing
         val flood = hasUnnegated(tokens, floodWords)
         val crowd = hasUnnegated(tokens, crowdWords) || hasPhrase(tokens, crowdPhrases)
         val help = hasUnnegated(tokens, helpWords) || flood || negatedSafe(tokens) || crowd
@@ -302,6 +311,20 @@ object TriageEngine {
     private fun hasUnnegated(tokens: List<String>, words: Set<String>): Boolean {
         for (index in tokens.indices) {
             if (tokens[index] in words && tokens.getOrNull(index - 1) !in negations) return true
+        }
+        return false
+    }
+
+    /** "patay" or "patay na" plus a device within two words is ordinary, not a death. */
+    private fun patayRefersToDevice(tokens: List<String>): Boolean {
+        for (index in tokens.indices) {
+            if (tokens[index] != "patay") continue
+            val first = if (tokens.getOrNull(index + 1) == "na") index + 2 else index + 1
+            if (first > tokens.lastIndex) continue
+            val last = minOf(tokens.lastIndex, first + 1)
+            for (cursor in first..last) {
+                if (tokens[cursor] in patayDeviceWords) return true
+            }
         }
         return false
     }
