@@ -64,6 +64,8 @@ fun SakloloApp(viewModel: SakloloViewModel) {
     var askedBattery by remember { mutableStateOf(false) }
     var askedMic by remember { mutableStateOf(false) }
     var micBlocked by remember { mutableStateOf(false) }
+    var askedCamera by remember { mutableStateOf(false) }
+    var cameraBlocked by remember { mutableStateOf(false) }
     var askedLocation by remember { mutableStateOf(false) }
     var locationWarning by remember { mutableStateOf<String?>(null) }
 
@@ -72,6 +74,9 @@ fun SakloloApp(viewModel: SakloloViewModel) {
     ) { granted ->
         askedMic = true
         askedLocation = true
+        askedCamera = true
+        cameraBlocked = !hasPermission(context, Manifest.permission.CAMERA) &&
+            cameraIsPermanentlyDenied(context)
         val locationOk = granted[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
             granted[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         if (locationOk) viewModel.onLocationPermissionGranted()
@@ -106,6 +111,11 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                     onMicGranted = {},
                     onLocationWarning = { locationWarning = it },
                 )
+                if (hasPermission(context, Manifest.permission.CAMERA)) {
+                    cameraBlocked = false
+                } else if (askedCamera && cameraIsPermanentlyDenied(context)) {
+                    cameraBlocked = true
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -159,7 +169,10 @@ fun SakloloApp(viewModel: SakloloViewModel) {
 
     fun scanQr() {
         if (hasPermission(context, Manifest.permission.CAMERA)) {
+            cameraBlocked = false
             scanner.launch(scanOptions())
+        } else if (askedCamera && cameraIsPermanentlyDenied(context)) {
+            cameraBlocked = true
         } else {
             permissions.launch(requiredPermissions())
         }
@@ -262,6 +275,17 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                 Text("Microphone is off. Open settings.", color = Ink)
             }
         }
+        if (cameraBlocked) {
+            Text(
+                "Camera is off. Allow it to scan a group QR.",
+                color = Ink,
+                fontSize = 13.sp,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            TextButton(onClick = { openAppSettings(context) }) {
+                Text("Open settings", color = Ink)
+            }
+        }
         locationWarning?.let {
             Text(it, color = Ink, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
         }
@@ -281,7 +305,7 @@ fun SakloloApp(viewModel: SakloloViewModel) {
 
 private fun scanOptions(): ScanOptions = ScanOptions().apply {
     setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-    setPrompt("Scan a B-LINK alert")
+    setPrompt("Scan a B-LINK group QR to join")
     setBeepEnabled(false)
     setOrientationLocked(true)
 }
@@ -325,6 +349,12 @@ private fun syncPermissions(
     } else if (askedMic && micIsPermanentlyDenied(context)) {
         onMicBlocked(true)
     }
+}
+
+private fun cameraIsPermanentlyDenied(context: Context): Boolean {
+    val activity = context as? Activity ?: return false
+    if (hasPermission(context, Manifest.permission.CAMERA)) return false
+    return !ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.CAMERA)
 }
 
 private fun micIsPermanentlyDenied(context: Context): Boolean {

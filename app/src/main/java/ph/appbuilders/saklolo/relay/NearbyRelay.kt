@@ -19,6 +19,7 @@ import ph.appbuilders.saklolo.audio.WavPcm
 import ph.appbuilders.saklolo.group.ClipGate
 import ph.appbuilders.saklolo.group.GroupNote
 import ph.appbuilders.saklolo.group.GroupStore
+import ph.appbuilders.saklolo.group.NoteRelay
 import ph.appbuilders.saklolo.group.PieceKind
 import ph.appbuilders.saklolo.group.RelayPiece
 import ph.appbuilders.saklolo.group.SosDispatch
@@ -212,6 +213,20 @@ class NearbyRelay(
     }
 
     private fun deliverNotes(endpointId: String, notes: List<GroupNote>): Boolean {
+        var sent = false
+        for (chunkNotes in NoteRelay.chunks(notes, MAX_PAYLOAD)) {
+            if (sendNotePayload(endpointId, chunkNotes)) {
+                sent = true
+            } else if (chunkNotes.size > 1) {
+                for (note in chunkNotes) {
+                    if (sendNotePayload(endpointId, listOf(note))) sent = true
+                }
+            }
+        }
+        return sent
+    }
+
+    private fun sendNotePayload(endpointId: String, notes: List<GroupNote>): Boolean {
         val files = prepareFiles(notes.map { it.id to it.audioPath })
         val bytes = AlertJson.encodeEnvelope(
             emptyList(),
@@ -513,7 +528,7 @@ class NearbyRelay(
     companion object {
         private const val TAG = "SakloloRelay"
         const val SERVICE_ID = "ph.appbuilders.saklolo.relay"
-        private const val MAX_PAYLOAD = 32 * 1024
+        private const val MAX_PAYLOAD = NoteRelay.MAX_BYTES
     }
 }
 

@@ -65,7 +65,7 @@ object TriageEngine {
     private val fireWords = setOf("sunog", "nasusunog", "nagdilaab", "fire", "apoy")
     private val drownWords = setOf("nalulunod", "nalunod", "nalumos", "drowning")
     private val severeWords = setOf(
-        "namamatay", "namatay", "patay", "dead", "dying", "ambulansya", "ambulance", "dugo", "blood",
+        "namamatay", "namatay", "dead", "dying", "ambulansya", "ambulance", "dugo", "blood",
         "landslide", "gumuho",
     )
 
@@ -106,6 +106,7 @@ object TriageEngine {
         listOf("heart", "attack"),
         listOf("atake", "sa", "puso"),
         listOf("crowd", "crush"),
+        listOf("patay", "na"),
     )
     /** "ipit na ipit" is crowded, like siksikan. Bare "ipit" is a hair clip, not a pin. */
     private val crowdPhrases = listOf(

@@ -1,6 +1,7 @@
 package ph.appbuilders.saklolo.group
 
 import ph.appbuilders.saklolo.model.Alert
+import ph.appbuilders.saklolo.model.AlertJson
 import ph.appbuilders.saklolo.model.WireNote
 import ph.appbuilders.saklolo.relay.RelayPolicy
 import ph.appbuilders.saklolo.triage.TriageEngine
@@ -177,6 +178,51 @@ object ClipGate {
     const val MIN_CLIP_BYTES = 45L
 
     fun acceptLength(length: Long): Boolean = length in MIN_CLIP_BYTES..MAX_CLIP_BYTES
+}
+
+/** Nearby BYTES payloads must stay under 32 KB. History is sent as several envelopes. */
+object NoteRelay {
+    const val MAX_BYTES = 32 * 1024
+
+    fun chunks(notes: List<GroupNote>, maxBytes: Int = MAX_BYTES): List<List<GroupNote>> {
+        val chunks = ArrayList<List<GroupNote>>()
+        var current = ArrayList<GroupNote>()
+        for (note in notes) {
+            val candidate = current + note
+            val tooBig = envelopeSize(candidate) > maxBytes
+            if (tooBig && current.isNotEmpty()) {
+                chunks += current
+                current = arrayListOf(note)
+            } else {
+                current.add(note)
+            }
+        }
+        if (current.isNotEmpty()) chunks += current
+        return chunks
+    }
+
+    fun envelopeSize(notes: List<GroupNote>): Int =
+        AlertJson.encodeEnvelope(emptyList(), emptyList(), notes.map { it.toWire() })
+            .toByteArray(Charsets.UTF_8).size
+}
+
+/**
+ * A voice note is kept only when cancel did not move the epoch while Whisper ran.
+ * A moved epoch means the clip is discarded and the transcript is ignored.
+ */
+object VoiceDraft {
+    fun decide(startedEpoch: Int, currentEpoch: Int, transcript: String): Finish {
+        if (startedEpoch != currentEpoch) return Finish.Discarded
+        val body = transcript.trim()
+        if (body.isEmpty()) return Finish.Empty
+        return Finish.Keep(body)
+    }
+
+    sealed class Finish {
+        data class Keep(val body: String) : Finish()
+        data object Discarded : Finish()
+        data object Empty : Finish()
+    }
 }
 
 fun WireNote.toGroupNote(): GroupNote = GroupNote(

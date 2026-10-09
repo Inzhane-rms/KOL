@@ -24,6 +24,7 @@ import ph.appbuilders.saklolo.group.GroupNote
 import ph.appbuilders.saklolo.group.GroupQr
 import ph.appbuilders.saklolo.group.GroupTriage
 import ph.appbuilders.saklolo.group.Sighting
+import ph.appbuilders.saklolo.group.VoiceDraft
 import ph.appbuilders.saklolo.location.DeviceLocation
 import ph.appbuilders.saklolo.model.Alert
 import ph.appbuilders.saklolo.relay.NearbyPeer
@@ -101,6 +102,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     val voice: StateFlow<VoiceUiState> = _voice.asStateFlow()
     private var pendingVoice: GroupNote? = null
     private var sendVoiceWhenReady = false
+    private var voiceEpoch = 0
     private val _chatRead = MutableStateFlow(runtime.settings.lastChatReadMillis)
     val chatReadMillis: StateFlow<Long> = _chatRead.asStateFlow()
 
@@ -558,19 +560,22 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
 
     fun stopVoiceNote(sendAfter: Boolean = false) {
         if (sendAfter) sendVoiceWhenReady = true
+        val epoch = voiceEpoch
         viewModelScope.launch {
             if (!recordGate.tryLock()) return@launch
             try {
                 if (!_voice.value.recording && !recorder.isRunning) {
-                    if (sendVoiceWhenReady) commitPendingVoice()
+                    if (sendVoiceWhenReady && epoch == voiceEpoch) commitPendingVoice()
                     return@launch
                 }
                 runtime.relay.onLocalRecordingFinished()
                 _voice.update { it.copy(recording = false, status = "Transcribing…", transcript = "") }
-                finishVoice(recorder.stop())
+                finishVoice(recorder.stop(), epoch)
             } catch (error: Exception) {
                 sendVoiceWhenReady = false
-                _voice.update { it.copy(recording = false, status = error.message ?: "Transcription failed") }
+                if (epoch == voiceEpoch) {
+                    _voice.update { it.copy(recording = false, status = error.message ?: "Transcription failed") }
+                }
             } finally {
                 recordGate.unlock()
             }
@@ -591,8 +596,12 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
 
     fun cancelVoiceNote() {
         sendVoiceWhenReady = false
-        pendingVoice = null
+        voiceEpoch += 1
         recordGeneration += 1
+        val clip = pendingVoice?.audioPath
+        pendingVoice = null
+        if (!clip.isNullOrBlank()) File(clip).delete()
+        _voice.value = VoiceUiState()
         viewModelScope.launch {
             if (!recordGate.tryLock()) return@launch
             try {
@@ -602,7 +611,6 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
                 }
             } finally {
                 recordGate.unlock()
-                _voice.value = VoiceUiState()
             }
         }
     }
@@ -653,7 +661,8 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private suspend fun finishVoice(pcm: FloatArray) {
+    private suspend fun finishVoice(pcm: FloatArray, epoch: Int) {
+        if (epoch != voiceEpoch) return
         if (pcm.size < PcmRecorder.SAMPLE_RATE / 2) {
             sendVoiceWhenReady = false
             _voice.update { it.copy(recording = false, status = "Recording was too short", transcript = "") }
@@ -668,38 +677,53 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         val text = withContext(Dispatchers.Default) {
             engine.transcribe(pcm, _sos.value.language.whisperCode)
         }
-        if (text.isBlank()) {
-            sendVoiceWhenReady = false
-            _voice.update { it.copy(status = "No speech recognized", transcript = "") }
-            return
-        }
-        val group = runtime.groupStore.active() ?: run {
-            sendVoiceWhenReady = false
-            return
-        }
-        val location = DeviceLocation.lastKnown(getApplication())
-        val id = java.util.UUID.randomUUID().toString()
-        val audioPath = run {
-            val file = WavPcm.clipFile(runtime.clipsDir, id)
-            WavPcm.write(file, pcm)
-            if (file.exists() && file.length() > WavPcm.HEADER_BYTES) file.absolutePath else null
-        }
-        pendingVoice = GroupNote(
-            id = id,
-            groupId = group.id,
-            sender = runtime.settings.displayName,
-            body = text.trim().take(800),
-            createdAtMillis = System.currentTimeMillis(),
-            audioPath = audioPath,
-            lat = location?.first,
-            lon = location?.second,
-            urgency = GroupTriage.labelVoice(text),
-            kind = "voice",
-        )
-        _voice.update { it.copy(recording = false, status = "", transcript = pendingVoice?.body.orEmpty()) }
-        if (sendVoiceWhenReady) {
-            sendVoiceWhenReady = false
-            commitPendingVoice()
+        when (val decision = VoiceDraft.decide(epoch, voiceEpoch, text)) {
+            is VoiceDraft.Finish.Discarded -> {
+                sendVoiceWhenReady = false
+                pendingVoice = null
+                _voice.value = VoiceUiState()
+                return
+            }
+            is VoiceDraft.Finish.Empty -> {
+                sendVoiceWhenReady = false
+                _voice.update { it.copy(status = "No speech recognized", transcript = "") }
+                return
+            }
+            is VoiceDraft.Finish.Keep -> {
+                val group = runtime.groupStore.active() ?: run {
+                    sendVoiceWhenReady = false
+                    return
+                }
+                val location = DeviceLocation.lastKnown(getApplication())
+                val id = java.util.UUID.randomUUID().toString()
+                val file = WavPcm.clipFile(runtime.clipsDir, id)
+                WavPcm.write(file, pcm)
+                if (VoiceDraft.decide(epoch, voiceEpoch, decision.body) is VoiceDraft.Finish.Discarded) {
+                    file.delete()
+                    sendVoiceWhenReady = false
+                    pendingVoice = null
+                    _voice.value = VoiceUiState()
+                    return
+                }
+                val audioPath = if (file.exists() && file.length() > WavPcm.HEADER_BYTES) file.absolutePath else null
+                pendingVoice = GroupNote(
+                    id = id,
+                    groupId = group.id,
+                    sender = runtime.settings.displayName,
+                    body = decision.body.take(800),
+                    createdAtMillis = System.currentTimeMillis(),
+                    audioPath = audioPath,
+                    lat = location?.first,
+                    lon = location?.second,
+                    urgency = GroupTriage.labelVoice(decision.body),
+                    kind = "voice",
+                )
+                _voice.update { it.copy(recording = false, status = "", transcript = pendingVoice?.body.orEmpty()) }
+                if (sendVoiceWhenReady && epoch == voiceEpoch) {
+                    sendVoiceWhenReady = false
+                    commitPendingVoice()
+                }
+            }
         }
     }
 

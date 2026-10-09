@@ -976,7 +976,7 @@ fun V16Sos(
     onRespond: (String) -> Unit,
     clipReady: (Alert) -> Boolean,
 ) {
-    var medic by remember { mutableStateOf(true) }
+    var medic by remember { mutableStateOf(false) }
     var filter by remember { mutableStateOf("all") }
     val lost = alerts.count { lostCompanion(it) }
     val done = alerts.count { it.responding }

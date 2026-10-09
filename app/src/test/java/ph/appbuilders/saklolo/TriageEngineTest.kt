@@ -156,6 +156,16 @@ class TriageEngineTest {
     }
 
     @Test
+    fun patayAloneIsNotCriticalButPatayNaAndNamatayAre() {
+        assertEquals(Urgency.NEEDS_HELP, TriageEngine.triage("patay").urgency)
+        assertEquals(Urgency.NEEDS_HELP, TriageEngine.triage("may patay").urgency)
+        assertEquals(Urgency.CRITICAL, TriageEngine.triage("patay na").urgency)
+        assertEquals(Urgency.CRITICAL, TriageEngine.triage("patay na siya").urgency)
+        assertEquals(Urgency.CRITICAL, TriageEngine.triage("namatay si Ana").urgency)
+        assertEquals(Urgency.CRITICAL, TriageEngine.triage("namamatay siya").urgency)
+    }
+
+    @Test
     fun nadagananAndHinimatayAreCritical() {
         assertEquals(Urgency.CRITICAL, TriageEngine.triage("nadaganan siya").urgency)
         assertEquals(Urgency.CRITICAL, TriageEngine.triage("hinimatay si Ana").urgency)

@@ -12,6 +12,8 @@ import ph.appbuilders.saklolo.group.GroupNote
 import ph.appbuilders.saklolo.group.GroupQr
 import ph.appbuilders.saklolo.group.GroupStore
 import ph.appbuilders.saklolo.group.GroupTriage
+import ph.appbuilders.saklolo.group.NoteRelay
+import ph.appbuilders.saklolo.group.VoiceDraft
 import ph.appbuilders.saklolo.group.MemoryGroupPersistence
 import ph.appbuilders.saklolo.group.PieceKind
 import ph.appbuilders.saklolo.group.RecordIntent
@@ -123,6 +125,36 @@ class ConcertLogicTest {
         assertTrue(ClipGate.acceptLength(1_000))
         assertEquals(RecordIntent.OpenQrJoin, recordIntent(0))
         assertEquals(RecordIntent.RecordVoice, recordIntent(1))
+    }
+
+    @Test
+    fun noteHistorySplitsIntoChunksUnder32Kb() {
+        val notes = (1..200).map { index ->
+            GroupNote(
+                id = "n$index",
+                groupId = "group-history",
+                sender = "Ana",
+                body = "late joiner history $index " + "x".repeat(80),
+                createdAtMillis = index.toLong(),
+            )
+        }
+        assertTrue(NoteRelay.envelopeSize(notes) > NoteRelay.MAX_BYTES)
+        assertEquals(32 * 1024, NoteRelay.MAX_BYTES)
+        val chunks = NoteRelay.chunks(notes)
+        assertTrue(chunks.size > 1)
+        assertEquals(notes.map { it.id }, chunks.flatten().map { it.id })
+        for (chunk in chunks) {
+            assertTrue(NoteRelay.envelopeSize(chunk) <= NoteRelay.MAX_BYTES)
+        }
+    }
+
+    @Test
+    fun cancelDuringTranscribeDiscardsTheClip() {
+        val discarded = VoiceDraft.decide(startedEpoch = 1, currentEpoch = 2, transcript = "Nasa gate ako")
+        assertTrue(discarded is VoiceDraft.Finish.Discarded)
+        val kept = VoiceDraft.decide(startedEpoch = 4, currentEpoch = 4, transcript = "  Nasa gate ako  ")
+        assertEquals("Nasa gate ako", (kept as VoiceDraft.Finish.Keep).body)
+        assertTrue(VoiceDraft.decide(4, 4, "   ") is VoiceDraft.Finish.Empty)
     }
 
     private fun note(groupId: String, body: String) = GroupNote(
