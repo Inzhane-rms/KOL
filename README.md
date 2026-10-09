@@ -20,7 +20,7 @@ This page describes [v0.12.7-test](https://github.com/Inzhane-rms/KOL/releases/t
 ## Known limits
 
 - No SOS broadcast or medic feed. The app's screens are Home, Contacts, Messages, Add, a chat, and a call.
-- Messages are not end-to-end encrypted. A 1:1 message may hop through other nearby KOL phones on the way to the person it is addressed to. Nothing is forwarded past 5 hops.
+- Relay is limited to a few hops.
 - No delivery receipts.
 - Not tested on many devices.
 - Range not measured.
@@ -33,8 +33,8 @@ The manifest removes the INTERNET permission. The app does not call a cloud mode
 - Speech-to-text: Whisper through whisper.cpp, Tagalog forced, with a fixed prompt and lexicon auto-correction (SpeechLexicon) on the phone (Whisper multilingual base, ggml-base-q5_1, whisper.cpp v1.9.5).
 - OpenAI Whisper multilingual base, ggml-base-q5_1.bin, converted and published by the whisper.cpp project (ggerganov/whisper.cpp), MIT license.
 - whisper.cpp library (MIT), compiled in unchanged; the JNI bridge is adapted from whisper.cpp's Android example.
-- Google Gemma 3 1B IT int4 (Gemma Terms of Use): optional and side-loaded, not shipped in the APK, and not used in the demo video.
-- Technologies: Kotlin 2.0.21, Jetpack Compose (BOM 2024.10.01), Android Room 2.6.1, Google Nearby Connections 19.3.0 (Google Play services), ZXing embedded 4.3.0, whisper.cpp v1.9.5 (NDK 27.2), MediaPipe LLM Inference tasks-genai 0.10.27 (for the optional Gemma), kotlinx-coroutines 1.9.0, kotlinx-serialization 1.7.3, Poppins font (SIL OFL 1.1). AGP 8.7.3, minSdk 26, targetSdk 35.
+- Google Gemma 3 1B IT int4 (Gemma Terms of Use): optional and not bundled in the APK, and not used in the demo video.
+- Technologies: Kotlin 2.0.21, Jetpack Compose (BOM 2024.10.01), Android Room 2.6.1, Google Nearby Connections 19.3.0 (Google Play services), ZXing embedded 4.3.0 (Apache-2.0), whisper.cpp v1.9.5 (NDK 27.2), MediaPipe LLM Inference tasks-genai 0.10.27 (Apache-2.0) (for the optional Gemma), kotlinx-coroutines 1.9.0, kotlinx-serialization 1.7.3, Poppins font (SIL OFL 1.1). AGP 8.7.3, minSdk 26, targetSdk 35.
 - APIs and cloud services: none in the app. Google Nearby Connections is a local, offline API that runs through Google Play services on the phone.
 - Privacy: voice clips and transcripts never go to a server or the internet. They stay on KOL phones: the sender's, the receiver's, and any nearby KOL phone that relays them along the way. They are not end-to-end encrypted.
 
