@@ -41,7 +41,10 @@ import androidx.compose.material.icons.outlined.QrCode
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -63,6 +66,7 @@ import ph.appbuilders.saklolo.contact.CaptionDisplay
 import ph.appbuilders.saklolo.contact.ContactRow
 import ph.appbuilders.saklolo.contact.Conversation
 import ph.appbuilders.saklolo.contact.DirectMessage
+import ph.appbuilders.saklolo.contact.NameChoice
 import ph.appbuilders.saklolo.ui.theme.Accent
 import ph.appbuilders.saklolo.ui.theme.Amber
 import ph.appbuilders.saklolo.ui.theme.CardWhite
@@ -721,6 +725,45 @@ private fun Modifier.pointerHold(enabled: Boolean, onStart: () -> Unit, onEnd: (
     }
 
 @Composable
+fun NamePrompt(initial: String, onContinue: (String) -> Unit) {
+    var draft by remember { mutableStateOf(initial) }
+    Column(
+        Modifier.fillMaxSize().background(Page).statusBarsPadding().navigationBarsPadding().padding(horizontal = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Spacer(Modifier.height(48.dp))
+        Text("B-LINK", color = VioletDeep, fontFamily = Poppins, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+        Text(
+            NameChoice.PROMPT,
+            color = Ink,
+            fontFamily = Poppins,
+            fontWeight = FontWeight.Bold,
+            fontSize = 22.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = 16.dp),
+        )
+        androidx.compose.foundation.text.BasicTextField(
+            value = draft,
+            onValueChange = { draft = it.take(40) },
+            textStyle = androidx.compose.ui.text.TextStyle(color = Ink, fontFamily = Poppins, fontSize = 18.sp),
+            modifier = Modifier.padding(top = 28.dp).fillMaxWidth().height(56.dp).clip(RoundedCornerShape(28.dp)).background(CardWhite).border(1.dp, Hairline, RoundedCornerShape(28.dp)).padding(horizontal = 18.dp),
+            decorationBox = { inner ->
+                Box(Modifier.fillMaxWidth().height(56.dp), contentAlignment = Alignment.CenterStart) {
+                    if (draft.isEmpty()) Text(NameChoice.PROMPT, color = InkSoft, fontFamily = Poppins, fontSize = 16.sp)
+                    inner()
+                }
+            },
+        )
+        Box(
+            Modifier.padding(top = 16.dp).fillMaxWidth().height(56.dp).clip(RoundedCornerShape(28.dp)).background(Violet).clickable { onContinue(draft) },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("Continue", color = Color.White, fontFamily = Poppins, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        }
+    }
+}
+
+@Composable
 fun V17Add(
     name: String,
     code: String,
@@ -746,12 +789,33 @@ fun V17Add(
                 if (qr != null) {
                     androidx.compose.foundation.Image(qr, contentDescription = "Your contact QR", modifier = Modifier.size(200.dp))
                 }
-                androidx.compose.foundation.text.BasicTextField(
-                    value = name,
-                    onValueChange = onName,
-                    textStyle = androidx.compose.ui.text.TextStyle(color = Ink, fontFamily = Poppins, fontWeight = FontWeight.Bold, fontSize = 18.sp, textAlign = TextAlign.Center),
-                    modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
-                )
+                var editingName by remember { mutableStateOf(false) }
+                if (!editingName) {
+                    Text(
+                        name,
+                        color = Ink,
+                        fontFamily = Poppins,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 8.dp).fillMaxWidth().clickable { editingName = true },
+                    )
+                } else {
+                    androidx.compose.foundation.text.BasicTextField(
+                        value = name,
+                        onValueChange = onName,
+                        textStyle = androidx.compose.ui.text.TextStyle(color = Ink, fontFamily = Poppins, fontWeight = FontWeight.Bold, fontSize = 18.sp, textAlign = TextAlign.Center),
+                        modifier = Modifier.padding(top = 8.dp).fillMaxWidth().height(56.dp),
+                        decorationBox = { inner ->
+                            Box(Modifier.fillMaxWidth().height(56.dp), contentAlignment = Alignment.Center) {
+                                if (name.isEmpty()) {
+                                    Text(NameChoice.PROMPT, color = InkSoft, fontFamily = Poppins, fontSize = 16.sp)
+                                }
+                                inner()
+                            }
+                        },
+                    )
+                }
                 Text(code, color = VioletDeep, fontFamily = Poppins, fontWeight = FontWeight.Bold, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp).clip(CircleShape).background(VioletLight).padding(horizontal = 12.dp, vertical = 4.dp))
             }
             Text("Recently added", color = Ink, fontFamily = Poppins, fontWeight = FontWeight.Bold, fontSize = 14.sp, modifier = Modifier.padding(top = 16.dp, bottom = 8.dp))

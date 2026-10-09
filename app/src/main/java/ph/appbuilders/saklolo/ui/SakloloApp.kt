@@ -29,6 +29,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
@@ -73,6 +75,7 @@ fun SakloloApp(viewModel: SakloloViewModel) {
     var search by remember { mutableStateOf("") }
     var quickCall by remember { mutableStateOf(false) }
     var nameDraft by remember { mutableStateOf(viewModel.displayName()) }
+    var askName by remember { mutableStateOf(viewModel.needsNamePrompt()) }
     var settingsOpen by remember { mutableStateOf(false) }
     var askedBattery by remember { mutableStateOf(false) }
     var askedMic by remember { mutableStateOf(false) }
@@ -176,8 +179,9 @@ fun SakloloApp(viewModel: SakloloViewModel) {
             if (route != CALL) route = CALL
         }
     }
-    BackHandler(enabled = route == THREAD || route == CALL || quickCall) {
+    BackHandler(enabled = askName || quickCall || route != CONTACTS) {
         when {
+            askName -> Unit
             quickCall -> quickCall = false
             route == CALL -> {
                 viewModel.endCall()
@@ -364,6 +368,23 @@ fun SakloloApp(viewModel: SakloloViewModel) {
         }
         locationWarning?.let {
             Text(it, color = Ink, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+        }
+    }
+
+    if (askName) {
+        Dialog(
+            onDismissRequest = {},
+            properties = DialogProperties(
+                dismissOnBackPress = false,
+                dismissOnClickOutside = false,
+                usePlatformDefaultWidth = false,
+            ),
+        ) {
+            NamePrompt(initial = viewModel.displayName()) { typed ->
+                viewModel.confirmDisplayName(typed)
+                nameDraft = viewModel.displayName()
+                askName = false
+            }
         }
     }
 

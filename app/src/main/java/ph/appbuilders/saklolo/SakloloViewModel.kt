@@ -24,6 +24,9 @@ import ph.appbuilders.saklolo.contact.CaptionDisplay
 import ph.appbuilders.saklolo.contact.CallMachine
 import ph.appbuilders.saklolo.contact.CallPhase
 import ph.appbuilders.saklolo.contact.CallState
+import ph.appbuilders.saklolo.contact.ClipPlay
+import ph.appbuilders.saklolo.contact.Hangup
+import ph.appbuilders.saklolo.contact.NameChoice
 import ph.appbuilders.saklolo.contact.ContactQr
 import ph.appbuilders.saklolo.contact.ContactRow
 import ph.appbuilders.saklolo.contact.Conversation
@@ -539,6 +542,16 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
 
     fun displayName(): String = runtime.settings.displayName
 
+    fun needsNamePrompt(): Boolean = NameChoice.show(runtime.settings.nameChosen)
+
+    fun confirmDisplayName(name: String) {
+        val (id, chosen) = NameChoice.saved(deviceId(), name, displayName())
+        runtime.settings.displayName = chosen
+        runtime.settings.nameChosen = true
+        runtime.ensureRelay()
+        check(deviceId() == id)
+    }
+
     fun setDisplayName(name: String) {
         runtime.settings.displayName = name
         runtime.ensureRelay()
@@ -994,12 +1007,14 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         call = CallMachine.inviteOut(peerId, row.name)
         routeCallAudio(speaker = false)
         sendDirect(peerId, "Call", kind = Ptt.INVITE)
+        watchRing()
         publishCall(emergency = null)
     }
 
     fun acceptCall() {
         val peer = call.peerId
         if (peer.isBlank()) return
+        cancelRing()
         handledSignals += openInviteIds(peer)
         call = CallMachine.accept(call)
         routeCallAudio(speaker = false)
@@ -1009,7 +1024,8 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
 
     fun declineCall() {
         val peer = call.peerId
-        if (peer.isNotBlank()) {
+        cancelRing()
+        if (peer.isNotBlank() && Hangup.notify(call.phase) != null) {
             handledSignals += openInviteIds(peer)
             sendDirect(peer, "Decline", kind = Ptt.DECLINE)
         }
@@ -1020,8 +1036,10 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
 
     fun endCall() {
         val peer = call.peerId
-        if (peer.isNotBlank() && call.phase == CallPhase.ACTIVE) {
-            sendDirect(peer, "End", kind = Ptt.END)
+        val kind = Hangup.notify(call.phase)
+        cancelRing()
+        if (peer.isNotBlank() && kind != null) {
+            sendDirect(peer, if (kind == Ptt.END) "End" else "Decline", kind = kind)
         }
         if (_call.value.holding) stopHold()
         call = CallMachine.end(call)
@@ -1152,6 +1170,24 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private var ringGeneration = 0
+
+    private fun cancelRing() {
+        ringGeneration += 1
+    }
+
+    private fun watchRing() {
+        ringGeneration += 1
+        val generation = ringGeneration
+        val started = System.currentTimeMillis()
+        viewModelScope.launch {
+            delay(Hangup.RING_MS)
+            if (generation != ringGeneration) return@launch
+            if (!Hangup.expired(started, System.currentTimeMillis())) return@launch
+            if (call.phase == CallPhase.OUTGOING || call.phase == CallPhase.INCOMING) endCall()
+        }
+    }
+
     private val handledSignals = HashSet<String>()
     private val dismissedEmergency = HashSet<String>()
     private var holding = false
@@ -1171,25 +1207,29 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
                     if (System.currentTimeMillis() - message.createdAtMillis > 120_000) {
                         handledSignals += message.id
                     } else {
+                        val wasIdle = call.phase == CallPhase.IDLE
                         call = CallMachine.inviteIn(call, message.fromDeviceId, message.senderName)
+                        if (wasIdle && call.phase == CallPhase.INCOMING) watchRing()
                     }
                 }
                 Ptt.ACCEPT, Ptt.DECLINE, Ptt.END -> {
-                    call = CallMachine.remoteSignal(call, message, myId)
+                    val next = CallMachine.remoteSignal(call, message, myId)
+                    if (next.phase != CallPhase.OUTGOING && next.phase != CallPhase.INCOMING) cancelRing()
+                    call = next
                     handledSignals += message.id
                 }
                 Ptt.CLIP -> {
+                    val path = ClipPlay.pending(message.id, message.audioPath, playedClips)
                     if (
+                        path != null &&
                         call.phase == CallPhase.ACTIVE &&
-                        message.fromDeviceId == call.peerId &&
-                        message.id !in playedClips
+                        message.fromDeviceId == call.peerId
                     ) {
-                        playedClips += message.id
-                        val path = message.audioPath
-                        if (!path.isNullOrBlank()) {
-                            call = call.copy(playing = true)
-                            playCallClip(path)
-                        }
+                        val started = playCallClip(path)
+                        val nextPlayed = ClipPlay.remember(message.id, started, playedClips.toSet())
+                        playedClips.clear()
+                        playedClips.addAll(nextPlayed)
+                        if (started) call = call.copy(playing = true)
                     }
                 }
             }
@@ -1272,13 +1312,13 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         call = call.copy(playing = false, speakerOn = false)
     }
 
-    private fun playCallClip(path: String) {
+    private fun playCallClip(path: String): Boolean {
         val file = File(path)
         if (!file.exists()) {
             call = call.copy(playing = false)
-            return
+            return false
         }
-        try {
+        return try {
             player?.release()
             val attrs = AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
@@ -1296,8 +1336,10 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
                 prepare()
                 start()
             }
+            true
         } catch (_: Exception) {
             call = call.copy(playing = false)
+            false
         }
     }
 

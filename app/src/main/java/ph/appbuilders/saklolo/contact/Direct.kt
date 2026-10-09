@@ -238,6 +238,43 @@ object CallMachine {
     fun canHold(current: CallState): Boolean = current.phase == CallPhase.ACTIVE && !current.playing
 }
 
+/** A clip is played only after its audio starts. A caption with no file stays unplayed. */
+object ClipPlay {
+    fun pending(id: String, audioPath: String?, played: Set<String>): String? {
+        if (id.isBlank() || id in played) return null
+        return audioPath?.takeIf { it.isNotBlank() }
+    }
+
+    fun remember(id: String, started: Boolean, played: Set<String>): Set<String> =
+        if (started && id.isNotBlank()) played + id else played
+}
+
+/** Every hangup tells the peer. Ringing sends decline. A connected call sends end. */
+object Hangup {
+    const val RING_MS = 30_000L
+
+    fun notify(phase: CallPhase): String? = when (phase) {
+        CallPhase.OUTGOING, CallPhase.INCOMING -> Ptt.DECLINE
+        CallPhase.ACTIVE -> Ptt.END
+        CallPhase.IDLE -> null
+    }
+
+    fun expired(startedAtMillis: Long, now: Long): Boolean =
+        startedAtMillis > 0L && now - startedAtMillis >= RING_MS
+}
+
+object NameChoice {
+    const val PROMPT = "What should friends see?"
+
+    fun show(chosen: Boolean): Boolean = !chosen
+
+    /** The device id is returned unchanged. A blank name keeps the current one. */
+    fun saved(deviceId: String, typed: String, fallback: String): Pair<String, String> {
+        val name = typed.trim().replace("|", " ").take(40).ifEmpty { fallback }
+        return deviceId to name
+    }
+}
+
 object VoiceControl {
     /** Stop and cancel act on the recorder only while this session is still the live one. */
     fun shouldStopRecorder(actionSession: Int, liveSession: Int, recorderRunning: Boolean): Boolean =

@@ -44,6 +44,12 @@ class DemoSettings(context: Context) {
 
     fun endpointName(): String = EndpointCard.encode(deviceId, displayName)
 
+    var nameChosen: Boolean
+        get() = prefs.getBoolean(KEY_NAME_CHOSEN, false)
+        set(value) {
+            prefs.edit().putBoolean(KEY_NAME_CHOSEN, value).apply()
+        }
+
     var lastChatReadMillis: Long
         get() = prefs.getLong(KEY_CHAT_READ, 0L)
         set(value) {
@@ -80,5 +86,6 @@ class DemoSettings(context: Context) {
         private const val KEY_RESTRICT = "restrict"
         private const val KEY_ALLOW = "allow"
         private const val KEY_LANG = "lang"
+        private const val KEY_NAME_CHOSEN = "name_chosen"
     }
 }
