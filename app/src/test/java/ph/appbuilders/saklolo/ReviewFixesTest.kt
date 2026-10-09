@@ -196,28 +196,34 @@ class ReviewFixesTest {
     @Test
     fun relayStartFailureDoesNotEscape() {
         var ensured = false
+        var foregroundError: Throwable? = null
         var failure: Throwable? = null
         val security = runRelayServiceStart(
             startForeground = { throw SecurityException("background") },
             ensureRelay = { ensured = true },
+            onForegroundFailure = { foregroundError = it },
             onFailure = { failure = it },
         )
-        assertFalse(security)
-        assertFalse(ensured)
-        assertTrue(failure is SecurityException)
-        assertTrue(relayStartFailureMessage(failure!!).contains("security"))
-        assertTrue(relayStartFailureMessage(failure!!).contains("background"))
+        assertTrue(security)
+        assertTrue(ensured)
+        assertTrue(foregroundError is SecurityException)
+        assertNull(failure)
+        assertTrue(relayStartFailureMessage(foregroundError!!).contains("security"))
+        assertTrue(relayStartFailureMessage(foregroundError!!).contains("background"))
 
-        failure = null
+        foregroundError = null
+        ensured = false
         val blocked = foregroundStartNotAllowed("not allowed")
         assertTrue(isForegroundStartNotAllowed(blocked))
         val foreground = runRelayServiceStart(
             startForeground = { throw blocked },
-            ensureRelay = { error("relay must not start") },
+            ensureRelay = { ensured = true },
+            onForegroundFailure = { foregroundError = it },
             onFailure = { failure = it },
         )
-        assertFalse(foreground)
-        assertTrue(relayStartFailureMessage(failure!!).contains("foreground-not-allowed"))
+        assertTrue(foreground)
+        assertTrue(ensured)
+        assertTrue(relayStartFailureMessage(foregroundError!!).contains("foreground-not-allowed"))
 
         failure = null
         val other = runRelayServiceStart(

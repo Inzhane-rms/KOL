@@ -33,6 +33,7 @@ import ph.appbuilders.saklolo.contact.Conversation
 import ph.appbuilders.saklolo.contact.DirectMessage
 import ph.appbuilders.saklolo.contact.Identity
 import ph.appbuilders.saklolo.contact.Ptt
+import ph.appbuilders.saklolo.contact.RingLoop
 import ph.appbuilders.saklolo.contact.VoiceControl
 import ph.appbuilders.saklolo.ask.AskEngine
 import ph.appbuilders.saklolo.ask.AskResult
@@ -149,6 +150,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     private var voicePeer: String? = null
     private val threadRead = HashMap<String, Long>()
     private val playedClips = HashSet<String>()
+    private val ring = RingLoop()
     private var call = CallState()
     private var callFocus: AudioFocusRequest? = null
     private val _threads = MutableStateFlow<List<Conversation>>(emptyList())
@@ -543,6 +545,12 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     fun displayName(): String = runtime.settings.displayName
 
     fun needsNamePrompt(): Boolean = NameChoice.show(runtime.settings.nameChosen)
+
+    fun setupSeen(): Boolean = runtime.settings.setupSeen
+
+    fun markSetupSeen() {
+        runtime.settings.setupSeen = true
+    }
 
     fun confirmDisplayName(name: String) {
         val (id, chosen) = NameChoice.saved(deviceId(), name, displayName())
@@ -1004,7 +1012,9 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
             _notice.value = "Not in range right now"
             return
         }
-        call = CallMachine.inviteOut(peerId, row.name)
+        syncClock()
+        ring.inviteOut(peerId, row.name)
+        applyRing()
         routeCallAudio(speaker = false)
         sendDirect(peerId, "Call", kind = Ptt.INVITE)
         watchRing()
@@ -1012,37 +1022,31 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun acceptCall() {
-        val peer = call.peerId
-        if (peer.isBlank()) return
-        cancelRing()
-        handledSignals += openInviteIds(peer)
-        call = CallMachine.accept(call)
+        if (call.peerId.isBlank()) return
+        syncClock()
+        ring.accept(runtime.directMessages.value, deviceId())
+        applyRing()
+        flushRingSends()
         routeCallAudio(speaker = false)
-        sendDirect(peer, "Accept", kind = Ptt.ACCEPT)
         publishCall(emergency = null)
     }
 
     fun declineCall() {
-        val peer = call.peerId
-        cancelRing()
-        if (peer.isNotBlank() && Hangup.notify(call.phase) != null) {
-            handledSignals += openInviteIds(peer)
-            sendDirect(peer, "Decline", kind = Ptt.DECLINE)
-        }
-        call = CallMachine.decline(call)
+        syncClock()
+        ring.decline(runtime.directMessages.value, deviceId())
+        applyRing()
+        flushRingSends()
         releaseCallAudio()
         publishCall(emergency = null)
     }
 
     fun endCall() {
-        val peer = call.peerId
-        val kind = Hangup.notify(call.phase)
-        cancelRing()
-        if (peer.isNotBlank() && kind != null) {
-            sendDirect(peer, if (kind == Ptt.END) "End" else "Decline", kind = kind)
-        }
-        if (_call.value.holding) stopHold()
-        call = CallMachine.end(call)
+        val holdingNow = _call.value.holding
+        syncClock()
+        ring.end(runtime.directMessages.value, deviceId())
+        applyRing()
+        flushRingSends()
+        if (holdingNow) stopHold()
         releaseCallAudio()
         publishCall(emergency = null)
     }
@@ -1170,25 +1174,43 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private var ringGeneration = 0
-
-    private fun cancelRing() {
-        ringGeneration += 1
-    }
-
     private fun watchRing() {
-        ringGeneration += 1
-        val generation = ringGeneration
-        val started = System.currentTimeMillis()
+        val token = ring.armToken()
         viewModelScope.launch {
             delay(Hangup.RING_MS)
-            if (generation != ringGeneration) return@launch
-            if (!Hangup.expired(started, System.currentTimeMillis())) return@launch
-            if (call.phase == CallPhase.OUTGOING || call.phase == CallPhase.INCOMING) endCall()
+            syncClock()
+            if (!ring.due(token)) return@launch
+            if (ring.call.phase != CallPhase.OUTGOING && ring.call.phase != CallPhase.INCOMING) return@launch
+            endCall()
         }
     }
 
-    private val handledSignals = HashSet<String>()
+    private fun syncClock() {
+        ring.now = System.currentTimeMillis()
+    }
+
+    private fun noteCall(next: CallState) {
+        call = next
+        ring.adopt(call)
+    }
+
+    private fun applyRing() {
+        val next = ring.call
+        val same = next.phase == call.phase && next.peerId == call.peerId
+        noteCall(if (same) next.copy(playing = call.playing, speakerOn = call.speakerOn) else next)
+    }
+
+    private fun flushRingSends() {
+        for (out in ring.drain()) {
+            val body = when (out.kind) {
+                Ptt.END -> "End"
+                Ptt.ACCEPT -> "Accept"
+                else -> "Decline"
+            }
+            sendDirect(out.peerId, body, kind = out.kind)
+        }
+    }
+
     private val dismissedEmergency = HashSet<String>()
     private var holding = false
     private var transcribingHold = false
@@ -1198,40 +1220,23 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun absorbSignals(messages: List<DirectMessage>) {
         val myId = deviceId()
+        syncClock()
+        val startRing = ring.absorb(messages, myId)
+        applyRing()
+        if (startRing) watchRing()
         for (message in messages.sortedBy { it.createdAtMillis }) {
-            if (message.kind !in setOf(Ptt.INVITE, Ptt.ACCEPT, Ptt.DECLINE, Ptt.END, Ptt.CLIP)) continue
-            if (message.toDeviceId != myId) continue
-            if (message.id in handledSignals && message.kind != Ptt.CLIP) continue
-            when (message.kind) {
-                Ptt.INVITE -> {
-                    if (System.currentTimeMillis() - message.createdAtMillis > 120_000) {
-                        handledSignals += message.id
-                    } else {
-                        val wasIdle = call.phase == CallPhase.IDLE
-                        call = CallMachine.inviteIn(call, message.fromDeviceId, message.senderName)
-                        if (wasIdle && call.phase == CallPhase.INCOMING) watchRing()
-                    }
-                }
-                Ptt.ACCEPT, Ptt.DECLINE, Ptt.END -> {
-                    val next = CallMachine.remoteSignal(call, message, myId)
-                    if (next.phase != CallPhase.OUTGOING && next.phase != CallPhase.INCOMING) cancelRing()
-                    call = next
-                    handledSignals += message.id
-                }
-                Ptt.CLIP -> {
-                    val path = ClipPlay.pending(message.id, message.audioPath, playedClips)
-                    if (
-                        path != null &&
-                        call.phase == CallPhase.ACTIVE &&
-                        message.fromDeviceId == call.peerId
-                    ) {
-                        val started = playCallClip(path)
-                        val nextPlayed = ClipPlay.remember(message.id, started, playedClips.toSet())
-                        playedClips.clear()
-                        playedClips.addAll(nextPlayed)
-                        if (started) call = call.copy(playing = true)
-                    }
-                }
+            if (message.kind != Ptt.CLIP || message.toDeviceId != myId) continue
+            val path = ClipPlay.pending(message.id, message.audioPath, playedClips)
+            if (
+                path != null &&
+                call.phase == CallPhase.ACTIVE &&
+                message.fromDeviceId == call.peerId
+            ) {
+                val started = playCallClip(path)
+                val nextPlayed = ClipPlay.remember(message.id, started, playedClips.toSet())
+                playedClips.clear()
+                playedClips.addAll(nextPlayed)
+                if (started) noteCall(call.copy(playing = true))
             }
         }
         val emergency = if (call.phase == CallPhase.ACTIVE) {
@@ -1244,11 +1249,6 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         }
         publishCall(emergency)
     }
-
-    private fun openInviteIds(peerId: String): List<String> =
-        runtime.directMessages.value.filter {
-            it.kind == Ptt.INVITE && it.fromDeviceId == peerId && it.toDeviceId == deviceId()
-        }.map { it.id }
 
     private fun publishCall(emergency: String? = _call.value.emergency) {
         val peer = call.peerId
@@ -1300,7 +1300,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
             .build()
         callFocus = request
         audio.requestAudioFocus(request)
-        call = call.copy(speakerOn = speaker)
+        noteCall(call.copy(speakerOn = speaker))
     }
 
     private fun releaseCallAudio() {
@@ -1309,13 +1309,13 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         callFocus = null
         audio.isSpeakerphoneOn = false
         audio.mode = AudioManager.MODE_NORMAL
-        call = call.copy(playing = false, speakerOn = false)
+        noteCall(call.copy(playing = false, speakerOn = false))
     }
 
     private fun playCallClip(path: String): Boolean {
         val file = File(path)
         if (!file.exists()) {
-            call = call.copy(playing = false)
+            noteCall(call.copy(playing = false))
             return false
         }
         return try {
@@ -1330,7 +1330,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
                 setOnCompletionListener {
                     it.release()
                     if (player === it) player = null
-                    call = call.copy(playing = false)
+                    noteCall(call.copy(playing = false))
                     publishCall()
                 }
                 prepare()
@@ -1338,7 +1338,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
             }
             true
         } catch (_: Exception) {
-            call = call.copy(playing = false)
+            noteCall(call.copy(playing = false))
             false
         }
     }

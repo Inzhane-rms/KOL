@@ -27,6 +27,8 @@ import ph.appbuilders.saklolo.model.AlertStore
 import ph.appbuilders.saklolo.relay.NearbyPeer
 import ph.appbuilders.saklolo.relay.NearbyRelay
 import ph.appbuilders.saklolo.relay.PeerFilter
+import ph.appbuilders.saklolo.relay.ReadyToConnect
+import ph.appbuilders.saklolo.relay.SetupProbe
 import ph.appbuilders.saklolo.summary.GemmaSummarizer
 
 /**
@@ -102,7 +104,15 @@ class SakloloRuntime private constructor(val app: Application) {
     }
 
     fun ensureRelay() {
+        val facts = SetupProbe.read(app)
+        val line = ReadyToConnect.permissionLine(facts)
         relay.setFilter(settings.peerFilter())
+        if (!ReadyToConnect.shouldStart(facts)) {
+            android.util.Log.i("BLINK", "relay service start skipped permissions=$line")
+            relay.stopScanning("Setup needed (${ReadyToConnect.requiredMissing(facts)})")
+            return
+        }
+        android.util.Log.i("BLINK", "relay service start permissions=$line")
         relay.start(settings.endpointName())
     }
 
@@ -115,7 +125,7 @@ class SakloloRuntime private constructor(val app: Application) {
         settings.restrictPeers = restrict
         settings.allowlistRaw = allowlist
         relay.setFilter(PeerFilter(restrict, ph.appbuilders.saklolo.relay.parseAllowlist(allowlist)))
-        relay.start(settings.endpointName())
+        ensureRelay()
     }
 
     fun refreshAlerts() {

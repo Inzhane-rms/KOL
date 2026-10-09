@@ -50,6 +50,12 @@ class DemoSettings(context: Context) {
             prefs.edit().putBoolean(KEY_NAME_CHOSEN, value).apply()
         }
 
+    var setupSeen: Boolean
+        get() = prefs.getBoolean(KEY_SETUP_SEEN, false)
+        set(value) {
+            prefs.edit().putBoolean(KEY_SETUP_SEEN, value).apply()
+        }
+
     var lastChatReadMillis: Long
         get() = prefs.getLong(KEY_CHAT_READ, 0L)
         set(value) {
@@ -87,5 +93,6 @@ class DemoSettings(context: Context) {
         private const val KEY_ALLOW = "allow"
         private const val KEY_LANG = "lang"
         private const val KEY_NAME_CHOSEN = "name_chosen"
+        private const val KEY_SETUP_SEEN = "setup_seen"
     }
 }

@@ -1,3 +1,6 @@
+# BLINK diagnostics use Log.i. proguard-android-optimize.txt strips Log.d and Log.v.
+# Do not add -assumenosideeffects for android.util.Log.i, Log.w, or Log.e.
+
 # Whisper JNI class name is part of the native symbol.
 -keep class ph.appbuilders.saklolo.stt.WhisperNative { *; }
 

@@ -13,12 +13,16 @@ class RelayService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val runtime = SakloloRuntime.get(application)
         val started = runRelayServiceStart(
             startForeground = { promoteToForeground() },
-            ensureRelay = { SakloloRuntime.get(application).ensureRelay() },
+            ensureRelay = { runtime.ensureRelay() },
+            onForegroundFailure = { error ->
+                Log.i(BLINK, "startForeground failure ${error.javaClass.simpleName} message=${error.message}")
+            },
             onFailure = { error ->
-                Log.e(TAG, "Could not start the relay", error)
-                SakloloRuntime.get(application).noteRelayStartFailed(relayStartFailureMessage(error))
+                Log.i(BLINK, "relay start failure ${error.javaClass.simpleName} message=${error.message}")
+                runtime.noteRelayStartFailed(relayStartFailureMessage(error))
                 stopSelf()
             },
         )
@@ -39,7 +43,7 @@ class RelayService : Service() {
     }
 
     private companion object {
-        const val TAG = "RelayService"
+        const val BLINK = "BLINK"
     }
 }
 
@@ -60,26 +64,25 @@ internal fun isForegroundStartNotAllowed(error: Throwable): Boolean =
     error.javaClass.name == FOREGROUND_START_NOT_ALLOWED
 
 /**
- * Runs foreground promotion and then the relay. [SecurityException] and
- * [android.app.ForegroundServiceStartNotAllowedException] are caught here, and
- * so is every other [Exception]. The failure is reported and never rethrown.
+ * Promotes to the foreground, then starts Nearby. A notification failure is
+ * logged and does not skip the relay. A failure inside [ensureRelay] is
+ * reported and never rethrown.
  */
 @SuppressLint("NewApi")
 internal fun runRelayServiceStart(
     startForeground: () -> Unit,
     ensureRelay: () -> Unit,
+    onForegroundFailure: (Throwable) -> Unit = {},
     onFailure: (Throwable) -> Unit,
 ): Boolean {
-    return try {
+    try {
         startForeground()
+    } catch (error: Exception) {
+        onForegroundFailure(error)
+    }
+    return try {
         ensureRelay()
         true
-    } catch (error: SecurityException) {
-        onFailure(error)
-        false
-    } catch (error: android.app.ForegroundServiceStartNotAllowedException) {
-        onFailure(error)
-        false
     } catch (error: Exception) {
         onFailure(error)
         false

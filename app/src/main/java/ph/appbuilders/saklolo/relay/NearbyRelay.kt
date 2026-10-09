@@ -2,11 +2,13 @@ package ph.appbuilders.saklolo.relay
 
 import android.content.Context
 import android.util.Log
+import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.nearby.Nearby
 import com.google.android.gms.nearby.connection.AdvertisingOptions
 import com.google.android.gms.nearby.connection.ConnectionInfo
 import com.google.android.gms.nearby.connection.ConnectionLifecycleCallback
 import com.google.android.gms.nearby.connection.ConnectionResolution
+import com.google.android.gms.nearby.connection.ConnectionsStatusCodes
 import com.google.android.gms.nearby.connection.ConnectionsClient
 import com.google.android.gms.nearby.connection.DiscoveredEndpointInfo
 import com.google.android.gms.nearby.connection.DiscoveryOptions
@@ -71,24 +73,52 @@ class NearbyRelay(
     private val queueLock = Any()
     private val liveJobs = ArrayDeque<() -> Unit>()
     private val historyJobs = ArrayDeque<() -> Unit>()
+    private var advertisingOk = false
+    private var discoveryOk = false
+    private var advertisePending = false
+    private var discoverPending = false
 
     init {
         ClipRelay.deletePending(clipsDir)
     }
 
     fun start(name: String) {
+        Log.i(BLINK, "relay start name=$name service=$SERVICE_ID")
         when (endpoints.beginSession(name)) {
-            RelayEndpoints.SessionStart.UNCHANGED -> publish("Relaying SOS alerts nearby")
+            RelayEndpoints.SessionStart.UNCHANGED -> {
+                if (!advertisingOk) beginAdvertising()
+                if (!discoveryOk) beginDiscovery()
+                if (advertisingOk && discoveryOk) publish("Looking for nearby B-LINK phones")
+            }
             RelayEndpoints.SessionStart.RENAME -> {
+                advertisingOk = false
+                advertisePending = false
                 client.stopAdvertising()
                 beginAdvertising()
             }
             RelayEndpoints.SessionStart.FRESH -> {
+                advertisingOk = false
+                discoveryOk = false
+                advertisePending = false
+                discoverPending = false
                 beginAdvertising()
                 beginDiscovery()
                 publish("Looking for nearby B-LINK phones")
             }
         }
+    }
+
+    /** Required setup dropped. The next [start] is a fresh advertise and discovery. */
+    fun stopScanning(reason: String) {
+        Log.i(BLINK, "relay stopped reason=$reason")
+        advertisingOk = false
+        discoveryOk = false
+        advertisePending = false
+        discoverPending = false
+        runCatching { client.stopAdvertising() }
+        runCatching { client.stopDiscovery() }
+        endpoints.noteStartFailed()
+        publish(reason)
     }
 
     fun setFilter(filter: PeerFilter) {
@@ -97,6 +127,10 @@ class NearbyRelay(
 
     /** Foreground start failed before or during [start]. The next start is a fresh one. */
     fun noteServiceStartFailed(message: String) {
+        advertisingOk = false
+        discoveryOk = false
+        advertisePending = false
+        discoverPending = false
         endpoints.noteStartFailed()
         publish(message)
     }
@@ -106,7 +140,7 @@ class NearbyRelay(
     fun broadcast(alert: Alert): Int {
         val count = endpoints.snapshot(null).size
         enqueue(live = true) {
-            Log.d(BLINK, "send type=sos id=${alert.id} size=bytes endpoints=$count")
+            Log.i(BLINK, "send type=sos id=${alert.id} size=bytes endpoints=$count")
             send(listOf(alert), exceptEndpoint = null, forceClips = true)
         }
         return count
@@ -118,7 +152,7 @@ class NearbyRelay(
         val peers = endpoints.snapshot(null)
         enqueue(live = true) {
             val withClip = !message.audioPath.isNullOrBlank()
-            Log.d(BLINK, "send type=${message.kind} id=${message.id} to=${message.toDeviceId} endpoints=${peers.size} clips=$withClip")
+            Log.i(BLINK, "send type=${message.kind} id=${message.id} to=${message.toDeviceId} endpoints=${peers.size} clips=$withClip")
             for (job in ResyncPlan.live(peers.map { it.endpointId }, message, withClip)) {
                 deliverDirect(job.endpointId, job.messages, job.attachClips)
             }
@@ -142,30 +176,64 @@ class NearbyRelay(
             try {
                 job()
             } catch (error: Exception) {
-                Log.w(BLINK, "relay job failed", error)
+                Log.i(BLINK, "relay job failed ${error.message}")
             }
         }
     }
 
     private fun beginAdvertising() {
+        if (advertisingOk || advertisePending) return
+        advertisePending = true
         val advertising = AdvertisingOptions.Builder().setStrategy(Strategy.P2P_CLUSTER).build()
         client.startAdvertising(endpoints.localName(), SERVICE_ID, connectionCallback, advertising)
+            .addOnSuccessListener {
+                advertisePending = false
+                advertisingOk = true
+                Log.i(BLINK, "startAdvertising success code=0 message=ok service=$SERVICE_ID")
+            }
             .addOnFailureListener { error ->
-                Log.w(TAG, "advertise failed", error)
+                advertisePending = false
+                val code = (error as? ApiException)?.statusCode
+                if (code == ConnectionsStatusCodes.STATUS_ALREADY_ADVERTISING) {
+                    advertisingOk = true
+                    Log.i(BLINK, "startAdvertising success code=$code message=already advertising service=$SERVICE_ID")
+                    return@addOnFailureListener
+                }
+                advertisingOk = false
+                Log.i(BLINK, "startAdvertising failure ${blinkFailure(error)} service=$SERVICE_ID")
                 failStart("Relay failed to advertise: ${error.message ?: "Play Services unavailable"}")
             }
     }
 
     private fun beginDiscovery() {
+        if (discoveryOk || discoverPending) return
+        discoverPending = true
         val discovery = DiscoveryOptions.Builder().setStrategy(Strategy.P2P_CLUSTER).build()
         client.startDiscovery(SERVICE_ID, discoveryCallback, discovery)
+            .addOnSuccessListener {
+                discoverPending = false
+                discoveryOk = true
+                Log.i(BLINK, "startDiscovery success code=0 message=ok service=$SERVICE_ID")
+            }
             .addOnFailureListener { error ->
-                Log.w(TAG, "discovery failed", error)
-                failStart("Relay failed to discover: ${error.message ?: "check Bluetooth and Wi-Fi"}")
+                discoverPending = false
+                val code = (error as? ApiException)?.statusCode
+                if (code == ConnectionsStatusCodes.STATUS_ALREADY_DISCOVERING) {
+                    discoveryOk = true
+                    Log.i(BLINK, "startDiscovery success code=$code message=already discovering service=$SERVICE_ID")
+                    return@addOnFailureListener
+                }
+                discoveryOk = false
+                Log.i(BLINK, "startDiscovery failure ${blinkFailure(error)} service=$SERVICE_ID")
+                failStart("Relay failed to discover: ${error.message ?: "check Bluetooth, Wi-Fi, and Location"}")
             }
     }
 
     private fun failStart(message: String) {
+        advertisingOk = false
+        discoveryOk = false
+        advertisePending = false
+        discoverPending = false
         endpoints.noteStartFailed()
         runCatching { client.stopAdvertising() }
         runCatching { client.stopDiscovery() }
@@ -326,7 +394,7 @@ class NearbyRelay(
                     direct,
                 )
             }
-            Log.d(BLINK, "file start id=${file.ownerId} payload=${file.payload.id} to=$endpointId")
+            Log.i(BLINK, "file start id=${file.ownerId} payload=${file.payload.id} to=$endpointId")
             client.sendPayload(endpointId, file.payload)
         }
     }
@@ -559,7 +627,7 @@ class NearbyRelay(
         discardPending(source)
         directStore.attachAudio(messageId, dest.absolutePath)
         onDirectChanged()
-        Log.d(BLINK, "file stored id=$messageId")
+        Log.i(BLINK, "file stored id=$messageId")
         val updated = directStore.find(messageId) ?: return true
         if (DirectGate.shouldForward(updated, directStore.myId)) {
             enqueue(live = true) {
@@ -621,7 +689,7 @@ class NearbyRelay(
                 status == PayloadTransferUpdate.Status.FAILURE ||
                 status == PayloadTransferUpdate.Status.CANCELED
             ) {
-                Log.d(BLINK, "file progress payload=${update.payloadId} status=$status")
+                Log.i(BLINK, "file progress payload=${update.payloadId} status=$status")
                 synchronized(clipLock) { outgoingClips.remove(update.payloadId) }
             }
             if (status != PayloadTransferUpdate.Status.SUCCESS) return
@@ -633,6 +701,7 @@ class NearbyRelay(
     private val connectionCallback = object : ConnectionLifecycleCallback() {
         override fun onConnectionInitiated(endpointId: String, info: ConnectionInfo) {
             val name = info.endpointName.orEmpty()
+            Log.i(BLINK, "connection initiated id=$endpointId name=$name")
             endpoints.rememberName(endpointId, name)
             if (!endpoints.allows(name)) {
                 client.rejectConnection(endpointId)
@@ -643,11 +712,14 @@ class NearbyRelay(
         }
 
         override fun onConnectionResult(endpointId: String, result: ConnectionResolution) {
+            val code = result.status.statusCode
+            val message = result.status.statusMessage ?: ""
+            Log.i(BLINK, "connection result id=$endpointId code=$code message=$message")
             if (result.status.isSuccess) {
                 endpoints.markConnected(endpointId, "Nearby phone", System.currentTimeMillis())
                 val peerName = endpoints.snapshot().firstOrNull { it.endpointId == endpointId }?.name
                 val card = EndpointCard.decode(peerName)
-                Log.d(BLINK, "join endpoint=$endpointId name=$peerName parsed=${card != null}")
+                Log.i(BLINK, "join endpoint=$endpointId name=$peerName parsed=${card != null}")
                 if (card != null) {
                     directStore.notePeer(card.deviceId, card.name, System.currentTimeMillis())
                 }
@@ -656,17 +728,17 @@ class NearbyRelay(
                 enqueue(live = false) {
                     val plan = ResyncPlan.history(endpointId, directStore.relayHistory())
                     val alerts = store.snapshot().map { it.copy(audioPath = null) }
-                    Log.d(BLINK, "resync endpoint=$endpointId alerts=${alerts.size} direct=${plan.messages.size} clips=false")
+                    Log.i(BLINK, "resync endpoint=$endpointId alerts=${alerts.size} direct=${plan.messages.size} clips=false")
                     if (alerts.isNotEmpty()) deliverAlerts(endpointId, alerts)
                     if (plan.messages.isNotEmpty()) deliverDirect(endpointId, plan.messages, attachClips = false)
                 }
             } else {
                 endpoints.markConnectFailed(endpointId)
-                Log.w(TAG, "connection failed ${result.status}")
             }
         }
 
         override fun onDisconnected(endpointId: String) {
+            Log.i(BLINK, "disconnected id=$endpointId")
             endpoints.markDisconnected(endpointId)
             syncNearby()
             val peers = endpoints.snapshot()
@@ -677,15 +749,17 @@ class NearbyRelay(
     private val discoveryCallback = object : EndpointDiscoveryCallback() {
         override fun onEndpointFound(endpointId: String, info: DiscoveredEndpointInfo) {
             val name = info.endpointName.orEmpty()
+            Log.i(BLINK, "endpoint found id=$endpointId name=$name")
             if (!endpoints.tryBeginConnect(endpointId, name)) return
             client.requestConnection(endpoints.localName(), endpointId, connectionCallback)
                 .addOnFailureListener {
                     endpoints.markConnectFailed(endpointId)
-                    Log.w(TAG, "requestConnection failed", it)
+                    Log.i(BLINK, "connection initiated failure id=$endpointId ${blinkFailure(it)}")
                 }
         }
 
         override fun onEndpointLost(endpointId: String) {
+            Log.i(BLINK, "endpoint lost id=$endpointId")
             endpoints.onLost(endpointId)
         }
     }
@@ -696,6 +770,12 @@ class NearbyRelay(
         const val SERVICE_ID = "ph.appbuilders.saklolo.relay"
         private const val MAX_PAYLOAD = NoteRelay.MAX_BYTES
     }
+}
+
+internal fun blinkFailure(error: Exception): String {
+    val code = (error as? ApiException)?.statusCode ?: -1
+    val message = error.message?.takeIf { it.isNotBlank() } ?: error.javaClass.simpleName
+    return "code=$code message=$message"
 }
 
 private data class OutClip(

@@ -280,7 +280,7 @@ private fun TabItem(
 }
 
 @Composable
-fun OfflinePill(right: String? = null, modifier: Modifier = Modifier) {
+fun OfflinePill(right: String? = null, onRight: (() -> Unit)? = null, modifier: Modifier = Modifier) {
     Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Row(
             Modifier.height(36.dp).clip(CircleShape).background(CardWhite).border(1.dp, Hairline, CircleShape).padding(horizontal = 12.dp),
@@ -290,11 +290,12 @@ fun OfflinePill(right: String? = null, modifier: Modifier = Modifier) {
             Text("Offline · on-device AI", color = Ink, fontFamily = Poppins, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, modifier = Modifier.padding(start = 8.dp))
         }
         if (right != null) {
+            val tap = if (onRight != null) Modifier.clickable(onClick = onRight) else Modifier
             Row(
-                Modifier.height(36.dp).clip(CircleShape).background(CardWhite).border(1.dp, Hairline, CircleShape).padding(horizontal = 12.dp),
+                tap.height(36.dp).clip(CircleShape).background(CardWhite).border(1.dp, Hairline, CircleShape).padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Box(Modifier.size(8.dp).clip(CircleShape).background(Cyan))
+                Box(Modifier.size(8.dp).clip(CircleShape).background(if (right.startsWith("Setup")) Accent else Cyan))
                 Text(right, color = Ink, fontFamily = Poppins, fontWeight = FontWeight.Bold, fontSize = 12.sp, modifier = Modifier.padding(start = 8.dp))
             }
         }
@@ -353,6 +354,8 @@ fun V17Contacts(
     onOpen: (ContactRow) -> Unit,
     onCall: (ContactRow) -> Unit,
     onScan: () -> Unit,
+    status: String,
+    onStatus: () -> Unit,
 ) {
     val inRange = rows.count { it.inRange }
     val favorites = rows.count { it.favorite }
@@ -366,7 +369,7 @@ fun V17Contacts(
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(0.dp)) {
         item {
             Spacer(Modifier.height(8.dp))
-            OfflinePill(right = "$inRange in range")
+            OfflinePill(right = status, onRight = onStatus)
             Text("Contacts", color = Ink, fontFamily = Poppins, fontWeight = FontWeight.Bold, fontSize = 26.sp, modifier = Modifier.padding(top = 16.dp))
             Text("Tap a name to open · call anyone in range", color = InkSoft, fontFamily = Poppins, fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp, bottom = 12.dp))
         }

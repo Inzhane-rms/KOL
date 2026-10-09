@@ -2,9 +2,13 @@ package ph.appbuilders.saklolo.ui
 
 import android.Manifest
 import android.app.Activity
+import android.bluetooth.BluetoothAdapter
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.location.LocationManager
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
@@ -45,8 +49,11 @@ import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import ph.appbuilders.saklolo.SakloloViewModel
 import ph.appbuilders.saklolo.contact.CallPhase
-import ph.appbuilders.saklolo.relay.RelayPermissions
+import ph.appbuilders.saklolo.relay.ReadyToConnect
 import ph.appbuilders.saklolo.relay.RelayService
+import ph.appbuilders.saklolo.relay.SetupFacts
+import ph.appbuilders.saklolo.relay.SetupKey
+import ph.appbuilders.saklolo.relay.SetupProbe
 import ph.appbuilders.saklolo.ui.theme.Ink
 
 private const val CONTACTS = "contacts"
@@ -82,28 +89,31 @@ fun SakloloApp(viewModel: SakloloViewModel) {
     var micBlocked by remember { mutableStateOf(false) }
     var askedCamera by remember { mutableStateOf(false) }
     var cameraBlocked by remember { mutableStateOf(false) }
-    var askedLocation by remember { mutableStateOf(false) }
-    var locationWarning by remember { mutableStateOf<String?>(null) }
+    var askedNearby by remember { mutableStateOf(false) }
+    var askedNotifications by remember { mutableStateOf(false) }
+    var pillTapped by remember { mutableStateOf(false) }
+    var setupSeen by remember { mutableStateOf(viewModel.setupSeen()) }
+    var facts by remember { mutableStateOf(decorateFacts(context, false, false, false, false)) }
 
+    val settingsLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        facts = decorateFacts(context, askedNearby, askedMic, askedCamera, askedNotifications)
+        startRelay(context)
+    }
     val permissions = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { granted ->
         askedMic = true
-        askedLocation = true
         askedCamera = true
+        askedNearby = true
         cameraBlocked = !hasPermission(context, Manifest.permission.CAMERA) &&
             cameraIsPermanentlyDenied(context)
         val locationOk = granted[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
             granted[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         if (locationOk) viewModel.onLocationPermissionGranted()
-        syncPermissions(
-            context,
-            askedMic = true,
-            askedLocation = true,
-            onMicBlocked = { micBlocked = it },
-            onMicGranted = {},
-            onLocationWarning = { locationWarning = it },
-        )
+        facts = decorateFacts(context, askedNearby, askedMic, askedCamera, askedNotifications)
+        startRelay(context)
         if (!askedBattery) {
             askedBattery = true
             (context as? Activity)?.let { askBatteryExemption(it) }
@@ -113,46 +123,45 @@ fun SakloloApp(viewModel: SakloloViewModel) {
         result.contents?.let(viewModel::ingestQr)
     }
 
-    DisposableEffect(lifecycleOwner, context, askedMic) {
+    DisposableEffect(lifecycleOwner, context, askedMic, askedNearby, askedCamera, askedNotifications) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 val locationOk = hasPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ||
                     hasPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION)
                 if (locationOk) viewModel.onLocationPermissionGranted()
-                syncPermissions(
-                    context,
-                    askedMic,
-                    askedLocation,
-                    onMicBlocked = { micBlocked = it },
-                    onMicGranted = {},
-                    onLocationWarning = { locationWarning = it },
-                )
+                facts = decorateFacts(context, askedNearby, askedMic, askedCamera, askedNotifications)
+                startRelay(context)
                 if (hasPermission(context, Manifest.permission.CAMERA)) {
                     cameraBlocked = false
                 } else if (askedCamera && cameraIsPermanentlyDenied(context)) {
                     cameraBlocked = true
                 }
+                if (hasPermission(context, Manifest.permission.RECORD_AUDIO)) micBlocked = false
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    LaunchedEffect(Unit) {
-        val showLocationCard = RelayPermissions.needsPreciseChoice(context) ||
-            (askedLocation && RelayPermissions.locationWarning(context) != null)
-        if (RelayPermissions.granted(context) || showLocationCard) {
-            syncPermissions(
-                context,
-                askedMic,
-                askedLocation,
-                onMicBlocked = { micBlocked = it },
-                onMicGranted = {},
-                onLocationWarning = { locationWarning = it },
-            )
-        } else {
-            permissions.launch(requiredPermissions())
+    DisposableEffect(context, askedNearby, askedMic, askedCamera, askedNotifications) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(incoming: Context?, intent: Intent?) {
+                facts = decorateFacts(context, askedNearby, askedMic, askedCamera, askedNotifications)
+                startRelay(context)
+            }
         }
+        val filter = IntentFilter().apply {
+            addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
+            addAction(LocationManager.MODE_CHANGED_ACTION)
+            addAction(LocationManager.PROVIDERS_CHANGED_ACTION)
+        }
+        ContextCompat.registerReceiver(context, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+        onDispose { runCatching { context.unregisterReceiver(receiver) } }
+    }
+
+    LaunchedEffect(Unit) {
+        facts = decorateFacts(context, askedNearby, askedMic, askedCamera, askedNotifications)
+        startRelay(context)
     }
 
     val unread = threads.sumOf { it.unread }
@@ -179,8 +188,18 @@ fun SakloloApp(viewModel: SakloloViewModel) {
             if (route != CALL) route = CALL
         }
     }
-    BackHandler(enabled = askName || quickCall || route != CONTACTS) {
+    val setupMissing = ReadyToConnect.requiredMissing(facts)
+    val showSetup = ReadyToConnect.show(setupSeen, setupMissing, pillTapped)
+    val statusText = ReadyToConnect.statusPill(setupMissing, contacts.count { it.inRange })
+    fun dismissSetup() {
+        viewModel.markSetupSeen()
+        setupSeen = true
+        pillTapped = false
+    }
+    BackHandler(enabled = showSetup || askName || quickCall || route != CONTACTS) {
         when {
+            showSetup && setupMissing > 0 -> Unit
+            showSetup -> dismissSetup()
             askName -> Unit
             quickCall -> quickCall = false
             route == CALL -> {
@@ -348,6 +367,8 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                 onOpen = { openThread(it.deviceId) },
                 onCall = { place(it.deviceId) },
                 onScan = { scanQr() },
+                status = statusText,
+                onStatus = { pillTapped = true },
             )
         }
         if (micBlocked) {
@@ -366,12 +387,9 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                 Text("Open settings", color = Ink)
             }
         }
-        locationWarning?.let {
-            Text(it, color = Ink, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
-        }
     }
 
-    if (askName) {
+    if (askName && !showSetup) {
         Dialog(
             onDismissRequest = {},
             properties = DialogProperties(
@@ -385,6 +403,40 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                 nameDraft = viewModel.displayName()
                 askName = false
             }
+        }
+    }
+
+    if (showSetup) {
+        Dialog(
+            onDismissRequest = { if (setupMissing == 0) dismissSetup() },
+            properties = DialogProperties(
+                dismissOnBackPress = false,
+                dismissOnClickOutside = false,
+                usePlatformDefaultWidth = false,
+                decorFitsSystemWindows = false,
+            ),
+        ) {
+            ReadyToConnectScreen(
+                rows = ReadyToConnect.rows(facts),
+                onFix = { key ->
+                    fixSetup(
+                        context,
+                        key,
+                        facts,
+                        settingsLauncher::launch,
+                        permissions::launch,
+                        onAskedNearby = { askedNearby = true },
+                        onAskedMic = { askedMic = true },
+                        onAskedCamera = { askedCamera = true },
+                        onAskedNotifications = { askedNotifications = true },
+                    )
+                },
+                onContinue = if (setupMissing == 0) {
+                    { dismissSetup() }
+                } else {
+                    null
+                },
+            )
         }
     }
 
@@ -436,25 +488,98 @@ private fun requiredPermissions(): Array<String> {
     return permissions.toTypedArray()
 }
 
-private fun syncPermissions(
+private fun startRelay(context: Context) {
+    ContextCompat.startForegroundService(context, Intent(context, RelayService::class.java))
+}
+
+private fun decorateFacts(
     context: Context,
+    askedNearby: Boolean,
     askedMic: Boolean,
-    askedLocation: Boolean,
-    onMicBlocked: (Boolean) -> Unit,
-    onMicGranted: (Boolean) -> Unit,
-    onLocationWarning: (String?) -> Unit,
+    askedCamera: Boolean,
+    askedNotifications: Boolean,
+): SetupFacts {
+    val base = SetupProbe.read(context)
+    return base.copy(
+        nearbyDenied = SetupProbe.permanentlyDenied(context, SetupProbe.missingNearby(context), askedNearby),
+        microphoneDenied = SetupProbe.permanentlyDenied(
+            context,
+            listOf(Manifest.permission.RECORD_AUDIO),
+            askedMic,
+        ),
+        cameraDenied = SetupProbe.permanentlyDenied(context, listOf(Manifest.permission.CAMERA), askedCamera),
+        notificationsDenied = Build.VERSION.SDK_INT >= 33 && SetupProbe.permanentlyDenied(
+            context,
+            listOf(Manifest.permission.POST_NOTIFICATIONS),
+            askedNotifications,
+        ),
+    )
+}
+
+private fun fixSetup(
+    context: Context,
+    key: SetupKey,
+    facts: SetupFacts,
+    launch: (Intent) -> Unit,
+    request: (Array<String>) -> Unit,
+    onAskedNearby: () -> Unit,
+    onAskedMic: () -> Unit,
+    onAskedCamera: () -> Unit,
+    onAskedNotifications: () -> Unit,
 ) {
-    val warning = RelayPermissions.locationWarning(context)
-    val showWarning = warning != null && (RelayPermissions.needsPreciseChoice(context) || askedLocation)
-    onLocationWarning(if (showWarning) warning else null)
-    onMicGranted(hasPermission(context, Manifest.permission.RECORD_AUDIO))
-    if (RelayPermissions.granted(context)) {
-        ContextCompat.startForegroundService(context, Intent(context, RelayService::class.java))
-    }
-    if (hasPermission(context, Manifest.permission.RECORD_AUDIO)) {
-        onMicBlocked(false)
-    } else if (askedMic && micIsPermanentlyDenied(context)) {
-        onMicBlocked(true)
+    when (key) {
+        SetupKey.BLUETOOTH -> {
+            if (!facts.nearbyPermission) {
+                onAskedNearby()
+                val missing = SetupProbe.missingNearby(context)
+                if (missing.isEmpty()) openAppSettings(context) else request(missing.toTypedArray())
+            } else {
+                launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
+            }
+        }
+        SetupKey.LOCATION -> launch(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+        SetupKey.NEARBY -> {
+            val missing = SetupProbe.missingNearby(context)
+            if (facts.nearbyDenied || missing.isEmpty()) {
+                openAppSettings(context)
+            } else {
+                onAskedNearby()
+                request(missing.toTypedArray())
+            }
+        }
+        SetupKey.WIFI -> {
+            val panel = if (Build.VERSION.SDK_INT >= 29) {
+                Intent(Settings.Panel.ACTION_WIFI)
+            } else {
+                Intent(Settings.ACTION_WIFI_SETTINGS)
+            }
+            launch(panel)
+        }
+        SetupKey.MICROPHONE -> {
+            if (facts.microphoneDenied) openAppSettings(context) else {
+                onAskedMic()
+                request(arrayOf(Manifest.permission.RECORD_AUDIO))
+            }
+        }
+        SetupKey.CAMERA -> {
+            if (facts.cameraDenied) openAppSettings(context) else {
+                onAskedCamera()
+                request(arrayOf(Manifest.permission.CAMERA))
+            }
+        }
+        SetupKey.NOTIFICATIONS -> {
+            if (Build.VERSION.SDK_INT < 33) return
+            if (facts.notificationsDenied) openAppSettings(context) else {
+                onAskedNotifications()
+                request(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
+            }
+        }
+        SetupKey.BATTERY -> launch(
+            Intent(
+                Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                Uri.parse("package:${context.packageName}"),
+            ),
+        )
     }
 }
 
