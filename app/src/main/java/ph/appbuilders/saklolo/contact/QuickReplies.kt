@@ -34,7 +34,7 @@ object QuickReplies {
             return listOf(send("Ok lang ako"), send("Hindi, tulungan mo ako"))
         }
         if (TriageEngine.mentionsEmergency(heard)) {
-            return listOf(send("Papunta na ako, 2 min"), send("Tatawag ako ng medic"))
+            return listOf(send("Papunta na ako"), send("Tatawag ako ng medic"))
         }
         return listOf(send("Sige"), send("Sandali lang"), send("Nasaan ka?"))
     }
@@ -56,6 +56,12 @@ object QuickReplies {
                 send(line)
             }
         }
+    }
+
+    /** Gemma is not asked for a blank line or for anything the rules already treat as an emergency. */
+    fun mayAskModel(heard: String): Boolean {
+        val key = heard.trim()
+        return key.isNotEmpty() && !TriageEngine.mentionsEmergency(key)
     }
 
     fun latestHeard(messages: List<DirectMessage>, myId: String): String =

@@ -32,6 +32,7 @@ import ph.appbuilders.saklolo.contact.ContactRow
 import ph.appbuilders.saklolo.contact.Conversation
 import ph.appbuilders.saklolo.contact.DirectMessage
 import ph.appbuilders.saklolo.contact.QuickReplies
+import ph.appbuilders.saklolo.contact.ReplyCache
 import ph.appbuilders.saklolo.contact.ReplyChip
 import ph.appbuilders.saklolo.contact.Identity
 import ph.appbuilders.saklolo.contact.Ptt
@@ -145,6 +146,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     val contacts: StateFlow<List<ContactRow>> = runtime.contacts
     val directMessages: StateFlow<List<DirectMessage>> = runtime.directMessages
 
+    private val replyCache = ReplyCache()
     private val _modelReplies = MutableStateFlow<Map<String, List<ReplyChip>>>(emptyMap())
     val modelReplies: StateFlow<Map<String, List<ReplyChip>>> = _modelReplies.asStateFlow()
 
@@ -1010,14 +1012,14 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         _threads.value = runtime.directStore.conversations(deviceId(), threadRead.toMap())
     }
 
-    /** Rules show immediately. Gemma replaces them only when it is already loaded and the text parses. */
+    /** Rules show immediately. Gemma replaces them only when it is already loaded and the text parses. Emergencies stay on the rules. */
     fun offerReplies(heard: String) {
         val key = heard.trim()
-        if (key.isEmpty() || !GemmaSummarizer.isReady()) return
+        if (!QuickReplies.mayAskModel(key) || !GemmaSummarizer.isReady()) return
         viewModelScope.launch(Dispatchers.Default) {
             val raw = GemmaSummarizer.suggestReplies(key) ?: return@launch
             val chips = QuickReplies.acceptModel(raw) ?: return@launch
-            _modelReplies.update { current -> current + (key to chips) }
+            _modelReplies.value = replyCache.put(key, chips)
         }
     }
 

@@ -76,6 +76,7 @@ import ph.appbuilders.saklolo.contact.ContactRow
 import ph.appbuilders.saklolo.contact.Conversation
 import ph.appbuilders.saklolo.contact.DirectMessage
 import ph.appbuilders.saklolo.contact.NameChoice
+import ph.appbuilders.saklolo.contact.ChipTapGuard
 import ph.appbuilders.saklolo.contact.ReplyChip
 import ph.appbuilders.saklolo.contact.Urgent
 import ph.appbuilders.saklolo.ui.theme.Accent
@@ -675,13 +676,16 @@ private fun WaveBars(path: String?) {
 @Composable
 private fun ReplyChips(chips: List<ReplyChip>, onTap: (ReplyChip) -> Unit) {
     if (chips.isEmpty()) return
+    val taps = remember { ChipTapGuard() }
     Row(
         Modifier.padding(top = 8.dp).fillMaxWidth().horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         chips.forEach { chip ->
             Box(
-                Modifier.height(48.dp).clip(RoundedCornerShape(24.dp)).background(VioletLight).clickable { onTap(chip) }.padding(horizontal = 14.dp),
+                Modifier.height(48.dp).clip(RoundedCornerShape(24.dp)).background(VioletLight).clickable {
+                    if (taps.allow(System.currentTimeMillis())) onTap(chip)
+                }.padding(horizontal = 14.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(chip.label, color = VioletDeep, fontFamily = Poppins, fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1)
@@ -725,6 +729,7 @@ fun V17InCall(
     onAccept: () -> Unit,
     onDecline: () -> Unit,
     chips: List<ReplyChip>,
+    onChip: (ReplyChip) -> Unit,
     onSendText: (String) -> Unit,
 ) {
     var gateDraft by remember { mutableStateOf("") }
@@ -783,7 +788,7 @@ fun V17InCall(
         }
         Text("Clips play automatically · up to 0:10 each", color = InkSoft, fontFamily = Poppins, fontSize = 11.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
         ReplyChips(chips) { chip ->
-            if (chip.fill) gateDraft = chip.sendText else onSendText(chip.sendText)
+            if (chip.fill) gateDraft = chip.sendText else onChip(chip)
         }
         if (gateDraft.isNotEmpty()) {
             Row(

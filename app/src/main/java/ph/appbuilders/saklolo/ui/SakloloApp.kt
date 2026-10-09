@@ -51,6 +51,8 @@ import ph.appbuilders.saklolo.SakloloViewModel
 import ph.appbuilders.saklolo.contact.CallPhase
 import ph.appbuilders.saklolo.contact.DirectGate
 import ph.appbuilders.saklolo.contact.QuickReplies
+import ph.appbuilders.saklolo.contact.ReplyChannel
+import ph.appbuilders.saklolo.contact.ReplySession
 import ph.appbuilders.saklolo.relay.ReadyToConnect
 import ph.appbuilders.saklolo.relay.RelayService
 import ph.appbuilders.saklolo.relay.SetupFacts
@@ -172,14 +174,19 @@ fun SakloloApp(viewModel: SakloloViewModel) {
         other == peerId && message.kind in DirectGate.chatKinds
     }
     val modelReplies by viewModel.modelReplies.collectAsStateWithLifecycle()
+    val threadReplies = remember { ReplySession() }
+    val callReplies = remember { ReplySession() }
     val threadHeard = QuickReplies.latestHeard(threadMessages, viewModel.deviceId())
     val callHeard = call.captions.lastOrNull { !it.mine && !it.transcribing }?.text?.trim().orEmpty()
     LaunchedEffect(threadHeard) { viewModel.offerReplies(threadHeard) }
     LaunchedEffect(callHeard) { viewModel.offerReplies(callHeard) }
-    fun chipsFor(heard: String) = when {
-        heard.isEmpty() -> emptyList()
-        modelReplies.containsKey(heard) -> modelReplies.getValue(heard)
-        else -> QuickReplies.fromRules(heard)
+    fun chipsFor(scope: String, heard: String, session: ReplySession) = when (val showing = session.offer(scope, heard)) {
+        "" -> emptyList()
+        else -> if (QuickReplies.mayAskModel(showing)) {
+            modelReplies[showing] ?: QuickReplies.fromRules(showing)
+        } else {
+            QuickReplies.fromRules(showing)
+        }
     }
     val qrPayload = viewModel.myQr()
     val qrImage by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, qrPayload) {
@@ -294,12 +301,18 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                         draft = draft,
                         onDraft = { draft = it },
                         onSend = {
-                            viewModel.sendDirect(row.deviceId, draft)
+                            val text = draft.trim()
+                            if (text.isEmpty()) return@V17Thread
+                            threadReplies.replied(row.deviceId, threadHeard, ReplyChannel.TEXT)
+                            viewModel.sendDirect(row.deviceId, text)
                             draft = ""
                         },
                         onMic = {
                             if (voice.recording) viewModel.stopVoiceNote(sendAfter = true)
-                            else ensureMic { viewModel.startVoiceNote(row.deviceId) }
+                            else ensureMic {
+                                threadReplies.replied(row.deviceId, threadHeard, ReplyChannel.VOICE)
+                                viewModel.startVoiceNote(row.deviceId)
+                            }
                         },
                         recording = voice.recording,
                         onPing = { viewModel.sendPing(row.deviceId) },
@@ -308,9 +321,14 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                         onFavorite = { viewModel.toggleFavorite(row.deviceId) },
                         onPlay = viewModel::playNote,
                         now = now,
-                        chips = chipsFor(threadHeard),
+                        chips = chipsFor(row.deviceId, threadHeard, threadReplies),
                         onChip = { chip ->
-                            if (chip.fill) draft = chip.sendText else viewModel.sendDirect(row.deviceId, chip.sendText)
+                            if (chip.fill) {
+                                draft = chip.sendText
+                            } else {
+                                threadReplies.replied(row.deviceId, threadHeard, ReplyChannel.CHIP)
+                                viewModel.sendDirect(row.deviceId, chip.sendText)
+                            }
                         },
                     )
                 }
@@ -320,7 +338,12 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                 inRange = contacts.firstOrNull { it.deviceId == call.peerId }?.inRange == true,
                 onUrgent = { viewModel.sendUrgent(call.peerId, call.emergency.orEmpty()) },
                 onDismiss = viewModel::dismissEmergency,
-                onHoldStart = { ensureMic { viewModel.startHold() } },
+                onHoldStart = {
+                    ensureMic {
+                        callReplies.replied(call.peerId, callHeard, ReplyChannel.VOICE)
+                        viewModel.startHold()
+                    }
+                },
                 onHoldEnd = viewModel::stopHold,
                 onSpeaker = { viewModel.setSpeaker(!call.speakerOn) },
                 onEnd = {
@@ -332,8 +355,17 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                     viewModel.declineCall()
                     route = CONTACTS
                 },
-                chips = chipsFor(callHeard),
-                onSendText = { text -> viewModel.sendDirect(call.peerId, text) },
+                chips = chipsFor(call.peerId, callHeard, callReplies),
+                onChip = { chip ->
+                    callReplies.replied(call.peerId, callHeard, ReplyChannel.CHIP)
+                    viewModel.sendDirect(call.peerId, chip.sendText)
+                },
+                onSendText = { text ->
+                    val trimmed = text.trim()
+                    if (trimmed.isEmpty()) return@V17InCall
+                    callReplies.replied(call.peerId, callHeard, ReplyChannel.TEXT)
+                    viewModel.sendDirect(call.peerId, trimmed)
+                },
             )
             MESSAGES -> V17Messages(
                 threads = threads,
