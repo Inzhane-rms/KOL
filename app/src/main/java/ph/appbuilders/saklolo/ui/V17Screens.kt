@@ -893,7 +893,7 @@ fun NamePrompt(initial: String, onContinue: (String) -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Spacer(Modifier.height(48.dp))
-        Text("B-LINK", color = VioletDeep, fontFamily = Poppins, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+        Text("KOL", color = VioletDeep, fontFamily = Poppins, fontWeight = FontWeight.Bold, fontSize = 14.sp)
         Text(
             NameChoice.PROMPT,
             color = Ink,

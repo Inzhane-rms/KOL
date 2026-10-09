@@ -29,12 +29,14 @@ class V0114Test {
     }
 
     @Test
-    fun tabsAreContactsMessagesCallAndAdd() {
-        assertEquals(listOf("contacts", "messages", "call", "add"), MainNav.tabs)
+    fun tabsAreHomeContactsMessagesAndAdd() {
+        assertEquals(listOf("home", "contacts", "messages", "add"), MainNav.tabs)
         assertFalse(MainNav.tabs.any { it.equals("sos", ignoreCase = true) })
-        assertEquals("contacts", MainNav.barRoute("thread"))
+        assertEquals("home", MainNav.barRoute("home"))
+        assertEquals("messages", MainNav.barRoute("thread"))
         assertEquals("messages", MainNav.barRoute("messages"))
         assertEquals("add", MainNav.barRoute("add"))
+        assertEquals("home", MainNav.HOME)
     }
 
     @Test

@@ -68,7 +68,7 @@ fun ReadyToConnectScreen(
                 color = Ink,
                 fontFamily = Poppins,
                 fontWeight = FontWeight.Bold,
-                fontSize = 26.sp,
+                fontSize = 32.sp,
                 modifier = Modifier.padding(top = 24.dp),
             )
             Text(
@@ -81,9 +81,9 @@ fun ReadyToConnectScreen(
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(24.dp))
+                    .clip(RoundedCornerShape(28.dp))
                     .background(CardWhite)
-                    .border(1.dp, Hairline, RoundedCornerShape(24.dp)),
+                    .border(1.dp, Hairline, RoundedCornerShape(28.dp)),
             ) {
                 rows.forEachIndexed { index, row ->
                     if (index > 0) {

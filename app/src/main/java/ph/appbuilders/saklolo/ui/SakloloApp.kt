@@ -19,6 +19,19 @@ import androidx.core.app.ActivityCompat
 import android.content.ClipData
 import android.content.ClipboardManager
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -29,13 +42,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -49,6 +66,7 @@ import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import ph.appbuilders.saklolo.SakloloViewModel
 import ph.appbuilders.saklolo.contact.CallPhase
+import ph.appbuilders.saklolo.contact.ContactQr
 import ph.appbuilders.saklolo.contact.DirectGate
 import ph.appbuilders.saklolo.contact.QuickReplies
 import ph.appbuilders.saklolo.contact.ReplyChannel
@@ -59,7 +77,11 @@ import ph.appbuilders.saklolo.relay.SetupFacts
 import ph.appbuilders.saklolo.relay.SetupKey
 import ph.appbuilders.saklolo.relay.SetupProbe
 import ph.appbuilders.saklolo.ui.theme.Ink
+import ph.appbuilders.saklolo.ui.theme.Page
+import ph.appbuilders.saklolo.ui.theme.Poppins
+import ph.appbuilders.saklolo.ui.theme.VioletDeep
 
+private const val HOME = MainNav.HOME
 private const val CONTACTS = MainNav.CONTACTS
 private const val MESSAGES = MainNav.MESSAGES
 private const val ADD = MainNav.ADD
@@ -76,11 +98,13 @@ fun SakloloApp(viewModel: SakloloViewModel) {
     val notice by viewModel.notice.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    var route by remember { mutableStateOf(CONTACTS) }
-    var peerId by remember { mutableStateOf<String?>(null) }
-    var filter by remember { mutableStateOf("all") }
-    var draft by remember { mutableStateOf("") }
-    var search by remember { mutableStateOf("") }
+    var route by rememberSaveable { mutableStateOf(HOME) }
+    var peerId by rememberSaveable { mutableStateOf("") }
+    var backTab by rememberSaveable { mutableStateOf(HOME) }
+    var filter by rememberSaveable { mutableStateOf("all") }
+    var draft by rememberSaveable { mutableStateOf("") }
+    var search by rememberSaveable { mutableStateOf("") }
+    var messageSearch by rememberSaveable { mutableStateOf("") }
     var quickCall by remember { mutableStateOf(false) }
     var nameDraft by remember { mutableStateOf(viewModel.displayName()) }
     var askName by remember { mutableStateOf(viewModel.needsNamePrompt()) }
@@ -168,7 +192,7 @@ fun SakloloApp(viewModel: SakloloViewModel) {
 
     val unread = threads.sumOf { it.unread }
     val now = System.currentTimeMillis()
-    val openRow = contacts.firstOrNull { it.deviceId == peerId }
+    val openRow = contacts.firstOrNull { peerId.isNotEmpty() && it.deviceId == peerId }
     val threadMessages = messages.filter { message ->
         val other = if (viewModel.isMine(message)) message.toDeviceId else message.fromDeviceId
         other == peerId && message.kind in DirectGate.chatKinds
@@ -197,8 +221,8 @@ fun SakloloApp(viewModel: SakloloViewModel) {
         if (nameDraft != viewModel.displayName()) viewModel.setDisplayName(nameDraft)
     }
     LaunchedEffect(route, peerId, openRow) {
-        if (route == THREAD && peerId != null) viewModel.markThreadRead(peerId!!)
-        if (route == THREAD && openRow == null) route = CONTACTS
+        if (route == THREAD && peerId.isNotEmpty()) viewModel.markThreadRead(peerId)
+        if (route == THREAD && openRow == null) route = if (backTab == THREAD) MESSAGES else backTab
     }
     LaunchedEffect(call.phase) {
         if (call.phase == CallPhase.INCOMING || call.phase == CallPhase.OUTGOING || call.phase == CallPhase.ACTIVE) {
@@ -207,22 +231,22 @@ fun SakloloApp(viewModel: SakloloViewModel) {
     }
     val setupMissing = ReadyToConnect.requiredMissing(facts)
     val showSetup = ReadyToConnect.show(setupSeen, setupMissing, pillTapped)
-    val statusText = ReadyToConnect.statusPill(setupMissing, contacts.count { it.inRange })
     fun dismissSetup() {
         viewModel.markSetupSeen()
         setupSeen = true
         pillTapped = false
     }
-    BackHandler(enabled = showSetup || askName || quickCall || route != CONTACTS) {
+    BackHandler(enabled = showSetup || askName || quickCall || route != HOME) {
         when {
             showSetup -> dismissSetup()
             askName -> Unit
             quickCall -> quickCall = false
             route == CALL -> {
                 viewModel.endCall()
-                route = if (peerId != null) THREAD else CONTACTS
+                route = backTab
             }
-            else -> route = CONTACTS
+            route == THREAD -> route = backTab
+            else -> route = HOME
         }
     }
 
@@ -249,7 +273,12 @@ fun SakloloApp(viewModel: SakloloViewModel) {
         }
     }
 
+    fun rememberTab() {
+        if (KolNav.showsBar(route)) backTab = route
+    }
+
     fun openThread(id: String) {
+        rememberTab()
         peerId = id
         draft = ""
         quickCall = false
@@ -262,159 +291,227 @@ fun SakloloApp(viewModel: SakloloViewModel) {
             viewModel.placeCall(id)
             return
         }
+        rememberTab()
         peerId = id
         quickCall = false
         viewModel.placeCall(id)
         route = CALL
     }
 
-    V17Scaffold(
-        route = MainNav.barRoute(route),
-        unread = unread,
-        showTabs = route != CALL,
-        notice = notice,
-        onDismissNotice = viewModel::clearNotice,
-        onContacts = { route = CONTACTS },
-        onMessages = { route = MESSAGES },
-        onCall = { quickCall = true },
-        onAdd = { route = ADD },
-        overlay = if (quickCall && route != CALL) {
-            {
-                V17QuickCall(
+    val scenes = rememberSaveableStateHolder()
+    val selfName = nameDraft.ifBlank { viewModel.displayName() }
+    Box(Modifier.fillMaxSize().background(Page)) {
+        AnimatedContent(
+            targetState = route,
+            transitionSpec = {
+                val fromRight = KolNav.slideFromRight(initialState, targetState)
+                val distance: (Int) -> Int = { full -> if (fromRight) full / 8 else -full / 8 }
+                val exit: (Int) -> Int = { full -> if (fromRight) -full / 8 else full / 8 }
+                (fadeIn(tween(KolNav.MOTION_MS)) + slideInHorizontally(tween(KolNav.MOTION_MS), distance)) togetherWith
+                    (fadeOut(tween(180)) + slideOutHorizontally(tween(KolNav.MOTION_MS), exit))
+            },
+            label = "kol",
+        ) { target ->
+            scenes.SaveableStateProvider(KolNav.stateKey(target, peerId)) {
+                when (target) {
+                    THREAD -> {
+                        val row = openRow
+                        if (row != null) {
+                            KolChat(
+                                row = row,
+                                messages = threadMessages,
+                                mine = viewModel::isMine,
+                                draft = draft,
+                                onDraft = { draft = it },
+                                onSend = {
+                                    val text = draft.trim()
+                                    if (text.isEmpty()) return@KolChat
+                                    threadReplies.replied(row.deviceId, threadHeard, ReplyChannel.TEXT)
+                                    viewModel.sendDirect(row.deviceId, text)
+                                    draft = ""
+                                },
+                                onMic = {
+                                    if (voice.recording) viewModel.stopVoiceNote(sendAfter = true)
+                                    else ensureMic {
+                                        threadReplies.replied(row.deviceId, threadHeard, ReplyChannel.VOICE)
+                                        viewModel.startVoiceNote(row.deviceId)
+                                    }
+                                },
+                                recording = voice.recording,
+                                onCall = { place(row.deviceId) },
+                                onBack = { route = backTab },
+                                onPlay = viewModel::playNote,
+                                now = now,
+                                chips = chipsFor(row.deviceId, threadHeard, threadReplies),
+                                onChip = { chip ->
+                                    if (chip.fill) draft = chip.sendText
+                                    else {
+                                        threadReplies.replied(row.deviceId, threadHeard, ReplyChannel.CHIP)
+                                        viewModel.sendDirect(row.deviceId, chip.sendText)
+                                    }
+                                },
+                            )
+                        }
+                    }
+                    CALL -> KolCall(
+                        call = call,
+                        inRange = contacts.firstOrNull { it.deviceId == call.peerId }?.inRange == true,
+                        onBack = {
+                            viewModel.endCall()
+                            route = backTab
+                        },
+                        onSpeaker = { viewModel.setSpeaker(!call.speakerOn) },
+                        onUrgent = { viewModel.sendUrgent(call.peerId, call.emergency.orEmpty()) },
+                        onDismiss = viewModel::dismissEmergency,
+                        onHoldStart = {
+                            ensureMic {
+                                callReplies.replied(call.peerId, callHeard, ReplyChannel.VOICE)
+                                viewModel.startHold()
+                            }
+                        },
+                        onHoldEnd = viewModel::stopHold,
+                        onEnd = {
+                            viewModel.endCall()
+                            route = backTab
+                        },
+                        onAccept = viewModel::acceptCall,
+                        onDecline = {
+                            viewModel.declineCall()
+                            route = backTab
+                        },
+                        chips = chipsFor(call.peerId, callHeard, callReplies),
+                        onChip = { chip ->
+                            callReplies.replied(call.peerId, callHeard, ReplyChannel.CHIP)
+                            viewModel.sendDirect(call.peerId, chip.sendText)
+                        },
+                        onSendText = { text ->
+                            val trimmed = text.trim()
+                            if (trimmed.isEmpty()) return@KolCall
+                            callReplies.replied(call.peerId, callHeard, ReplyChannel.TEXT)
+                            viewModel.sendDirect(call.peerId, trimmed)
+                        },
+                    )
+                    MESSAGES -> KolMessages(
+                        threads = threads,
+                        query = messageSearch,
+                        onQuery = { messageSearch = it },
+                        now = now,
+                        selfName = selfName,
+                        onMenu = { aboutOpen = true },
+                        onBell = { if (setupMissing > 0) pillTapped = true else route = MESSAGES },
+                        onAvatar = { route = ADD },
+                        bellDot = unread > 0 || setupMissing > 0,
+                        onOpen = { openThread(it.peerId) },
+                        onUrgent = { viewModel.sendUrgent(it.peerId, it.criticalBody) },
+                    )
+                    ADD -> KolAdd(
+                        name = nameDraft,
+                        onName = { nameDraft = it.take(40) },
+                        code = viewModel.shortCode(),
+                        qr = qrImage,
+                        nearby = contacts.filter { it.inRange && !it.saved },
+                        onMenu = { aboutOpen = true },
+                        onBell = { if (setupMissing > 0) pillTapped = true },
+                        onAvatar = { route = ADD },
+                        bellDot = unread > 0 || setupMissing > 0,
+                        onScan = { scanQr() },
+                        onShare = { shareCode(context, qrPayload) },
+                        onAdd = { row -> viewModel.ingestQr(ContactQr.encode(row.deviceId, row.name)) },
+                    )
+                    CONTACTS -> KolContacts(
+                        rows = contacts,
+                        filter = filter,
+                        onFilter = { filter = it },
+                        query = search,
+                        onQuery = { search = it },
+                        now = now,
+                        selfName = selfName,
+                        onMenu = { aboutOpen = true },
+                        onBell = { if (setupMissing > 0) pillTapped = true },
+                        onAvatar = { route = ADD },
+                        bellDot = unread > 0 || setupMissing > 0,
+                        onOpen = { openThread(it.deviceId) },
+                        onCall = { place(it.deviceId) },
+                        onFavorite = { viewModel.toggleFavorite(it.deviceId) },
+                    )
+                    else -> KolHome(
+                        name = selfName,
+                        rows = contacts,
+                        messages = messages,
+                        myId = viewModel.deviceId(),
+                        setupMissing = setupMissing,
+                        now = now,
+                        onMenu = { aboutOpen = true },
+                        onBell = { if (setupMissing > 0) pillTapped = true else if (unread > 0) route = MESSAGES },
+                        onAvatar = { route = ADD },
+                        bellDot = unread > 0 || setupMissing > 0,
+                        onCallAny = {
+                            val near = contacts.filter { it.inRange }
+                            when (near.size) {
+                                0 -> route = CONTACTS
+                                1 -> place(near.first().deviceId)
+                                else -> quickCall = true
+                            }
+                        },
+                        onMessage = { route = MESSAGES },
+                        onVoice = { id ->
+                            val heard = QuickReplies.latestHeard(
+                                messages.filter { message ->
+                                    val other = if (viewModel.isMine(message)) message.toDeviceId else message.fromDeviceId
+                                    other == id && message.kind in DirectGate.chatKinds
+                                },
+                                viewModel.deviceId(),
+                            )
+                            threadReplies.replied(id, heard, ReplyChannel.VOICE)
+                            openThread(id)
+                            ensureMic { viewModel.startVoiceNote(id) }
+                        },
+                        onAdd = { route = ADD },
+                        onOpen = { openThread(it) },
+                    )
+                }
+            }
+        }
+        val banner = notice
+        if (banner != null) {
+            Text(
+                banner,
+                color = VioletDeep,
+                fontFamily = Poppins,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 13.sp,
+                modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(horizontal = 20.dp, vertical = 8.dp).clickable { viewModel.clearNotice() },
+            )
+        }
+        if (micBlocked) {
+            TextButton(onClick = { openAppSettings(context) }, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 88.dp)) {
+                Text("Microphone is off. Open settings.", color = Ink)
+            }
+        }
+        if (cameraBlocked) {
+            TextButton(onClick = { openAppSettings(context) }, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 88.dp)) {
+                Text("Camera is off. Open settings.", color = Ink)
+            }
+        }
+        if (quickCall && route != CALL) {
+            Box(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(start = 20.dp, end = 20.dp, bottom = 88.dp)) {
+                KolQuickCall(
                     rows = contacts.filter { it.inRange },
                     onCall = { place(it.deviceId) },
                     onClose = { quickCall = false },
                 )
             }
-        } else {
-            null
-        },
-    ) {
-        when (route) {
-            THREAD -> {
-                val row = openRow
-                if (row != null) {
-                    V17Thread(
-                        row = row,
-                        messages = threadMessages,
-                        mine = viewModel::isMine,
-                        draft = draft,
-                        onDraft = { draft = it },
-                        onSend = {
-                            val text = draft.trim()
-                            if (text.isEmpty()) return@V17Thread
-                            threadReplies.replied(row.deviceId, threadHeard, ReplyChannel.TEXT)
-                            viewModel.sendDirect(row.deviceId, text)
-                            draft = ""
-                        },
-                        onMic = {
-                            if (voice.recording) viewModel.stopVoiceNote(sendAfter = true)
-                            else ensureMic {
-                                threadReplies.replied(row.deviceId, threadHeard, ReplyChannel.VOICE)
-                                viewModel.startVoiceNote(row.deviceId)
-                            }
-                        },
-                        recording = voice.recording,
-                        onPing = { viewModel.sendPing(row.deviceId) },
-                        onCall = { place(row.deviceId) },
-                        onBack = { route = CONTACTS },
-                        onFavorite = { viewModel.toggleFavorite(row.deviceId) },
-                        onPlay = viewModel::playNote,
-                        now = now,
-                        chips = chipsFor(row.deviceId, threadHeard, threadReplies),
-                        onChip = { chip ->
-                            if (chip.fill) {
-                                draft = chip.sendText
-                            } else {
-                                threadReplies.replied(row.deviceId, threadHeard, ReplyChannel.CHIP)
-                                viewModel.sendDirect(row.deviceId, chip.sendText)
-                            }
-                        },
-                    )
-                }
-            }
-            CALL -> V17InCall(
-                call = call,
-                inRange = contacts.firstOrNull { it.deviceId == call.peerId }?.inRange == true,
-                onUrgent = { viewModel.sendUrgent(call.peerId, call.emergency.orEmpty()) },
-                onDismiss = viewModel::dismissEmergency,
-                onHoldStart = {
-                    ensureMic {
-                        callReplies.replied(call.peerId, callHeard, ReplyChannel.VOICE)
-                        viewModel.startHold()
-                    }
-                },
-                onHoldEnd = viewModel::stopHold,
-                onSpeaker = { viewModel.setSpeaker(!call.speakerOn) },
-                onEnd = {
-                    viewModel.endCall()
-                    route = if (peerId != null) THREAD else CONTACTS
-                },
-                onAccept = viewModel::acceptCall,
-                onDecline = {
-                    viewModel.declineCall()
-                    route = CONTACTS
-                },
-                chips = chipsFor(call.peerId, callHeard, callReplies),
-                onChip = { chip ->
-                    callReplies.replied(call.peerId, callHeard, ReplyChannel.CHIP)
-                    viewModel.sendDirect(call.peerId, chip.sendText)
-                },
-                onSendText = { text ->
-                    val trimmed = text.trim()
-                    if (trimmed.isEmpty()) return@V17InCall
-                    callReplies.replied(call.peerId, callHeard, ReplyChannel.TEXT)
-                    viewModel.sendDirect(call.peerId, trimmed)
-                },
-            )
-            MESSAGES -> V17Messages(
-                threads = threads,
-                query = search,
-                onQuery = { search = it },
-                now = now,
-                onOpen = { openThread(it.peerId) },
-                onUrgent = { viewModel.sendUrgent(it.peerId, it.criticalBody) },
-            )
-            ADD -> V17Add(
-                name = nameDraft,
-                code = viewModel.shortCode(),
-                qr = qrImage,
-                recent = contacts.filter { it.saved }.sortedByDescending { it.addedAtMillis },
-                now = now,
-                bluetooth = bluetoothOn(context),
-                onName = { nameDraft = it.take(40) },
-                onScan = { scanQr() },
-                onShare = { shareCode(context, qrPayload) },
-                onCall = { place(it.deviceId) },
-            )
-            else -> V17Contacts(
-                rows = contacts,
-                filter = filter,
-                onFilter = { filter = it },
-                now = now,
-                onOpen = { openThread(it.deviceId) },
-                onCall = { place(it.deviceId) },
-                onScan = { scanQr() },
-                status = statusText,
-                onStatus = { pillTapped = true },
-                onAbout = { aboutOpen = true },
-            )
         }
-        if (micBlocked) {
-            TextButton(onClick = { openAppSettings(context) }) {
-                Text("Microphone is off. Open settings.", color = Ink)
-            }
-        }
-        if (cameraBlocked) {
-            Text(
-                "Camera is off. Allow it to scan a contact QR.",
-                color = Ink,
-                fontSize = 13.sp,
-                modifier = Modifier.padding(top = 8.dp),
+        if (KolNav.showsBar(route)) {
+            KolBar(
+                route = route,
+                unread = unread,
+                onHome = { route = HOME },
+                onContacts = { route = CONTACTS },
+                onMessages = { route = MESSAGES },
+                onAdd = { route = ADD },
+                modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 8.dp),
             )
-            TextButton(onClick = { openAppSettings(context) }) {
-                Text("Open settings", color = Ink)
-            }
         }
     }
 
@@ -484,7 +581,7 @@ fun SakloloApp(viewModel: SakloloViewModel) {
 
 private fun shareCode(context: Context, payload: String) {
     val clipboard = context.getSystemService(ClipboardManager::class.java)
-    clipboard?.setPrimaryClip(ClipData.newPlainText("B-LINK", payload))
+    clipboard?.setPrimaryClip(ClipData.newPlainText("KOL", payload))
     val send = Intent(Intent.ACTION_SEND).apply {
         type = "text/plain"
         putExtra(Intent.EXTRA_TEXT, payload)

@@ -14,9 +14,9 @@ class DemoSettings(context: Context) {
     private val prefs = context.getSharedPreferences("saklolo_demo", Context.MODE_PRIVATE)
 
     var deviceName: String
-        get() = prefs.getString(KEY_NAME, null) ?: Build.MODEL ?: "B-LINK"
+        get() = prefs.getString(KEY_NAME, null) ?: Build.MODEL ?: "KOL"
         set(value) {
-            prefs.edit().putString(KEY_NAME, value.trim().ifEmpty { "B-LINK" }).apply()
+            prefs.edit().putString(KEY_NAME, value.trim().ifEmpty { "KOL" }).apply()
         }
 
     val deviceId: String

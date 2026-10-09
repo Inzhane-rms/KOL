@@ -87,7 +87,7 @@ fun SettingsDialog(
             FieldLabel("Allowed names, comma separated")
             DemoField(allowlist) { allowlist = it }
             Text(
-                "Example: Camon 40, Spark 30. Leave the switch off to relay with every B-LINK phone.",
+                "Example: Camon 40, Spark 30. Leave the switch off to relay with every KOL phone.",
                 color = InkSoft,
                 fontSize = 14.sp,
             )

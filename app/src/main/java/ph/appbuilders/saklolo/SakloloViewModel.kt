@@ -925,7 +925,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         }
         val alert = QrCodec.decode(payload)
         if (alert == null) {
-            _notice.value = "That QR is not a B-LINK contact code"
+            _notice.value = "That QR is not a KOL contact code"
             return
         }
         val fresh = store.ingest(listOf(alert))

@@ -17,18 +17,18 @@ object RelayNotifications {
             val manager = context.getSystemService(NotificationManager::class.java)
             val channel = NotificationChannel(
                 CHANNEL,
-                "SOS relay",
+                "Nearby relay",
                 NotificationManager.IMPORTANCE_LOW,
             ).apply {
-                description = "Shows while B-LINK is relaying alerts to nearby phones"
+                description = "Shows while KOL is relaying to nearby phones"
                 setShowBadge(false)
             }
             manager.createNotificationChannel(channel)
         }
         return NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_saklolo)
-            .setContentTitle("B-LINK")
-            .setContentText("B-LINK is relaying SOS alerts nearby")
+            .setContentTitle("KOL")
+            .setContentText("KOL is relaying to nearby phones")
             .setOngoing(true)
             .setCategory(Notification.CATEGORY_SERVICE)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
