@@ -63,6 +63,7 @@ import ph.appbuilders.saklolo.contact.CaptionDisplay
 import ph.appbuilders.saklolo.contact.ContactRow
 import ph.appbuilders.saklolo.contact.Conversation
 import ph.appbuilders.saklolo.contact.DirectMessage
+import ph.appbuilders.saklolo.contact.Delivery
 import ph.appbuilders.saklolo.ui.theme.Accent
 import ph.appbuilders.saklolo.ui.theme.Amber
 import ph.appbuilders.saklolo.ui.theme.CardWhite
@@ -508,7 +509,10 @@ fun V17Thread(
                     VoiceBubble(message, own, onPlay)
                 } else {
                     val label = if (message.kind == "ping") "Ping" else CaptionDisplay.text(message.body)
-                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = if (own) Arrangement.End else Arrangement.Start) {
+                    Column(
+                        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        horizontalAlignment = if (own) Alignment.End else Alignment.Start,
+                    ) {
                         Text(
                             label,
                             color = if (own) Color.White else Ink,
@@ -516,6 +520,15 @@ fun V17Thread(
                             fontSize = 13.sp,
                             modifier = Modifier.clip(RoundedCornerShape(19.dp)).background(if (own) Violet else Page).padding(horizontal = 14.dp, vertical = 10.dp),
                         )
+                        if (own) {
+                            Text(
+                                Delivery.label(message.delivery, message.relayHops),
+                                color = InkSoft,
+                                fontFamily = Poppins,
+                                fontSize = 10.sp,
+                                modifier = Modifier.padding(top = 2.dp, end = 6.dp),
+                            )
+                        }
                     }
                 }
             }
@@ -568,6 +581,15 @@ private fun VoiceBubble(message: DirectMessage, mine: Boolean, onPlay: (String?)
         }
         Text("“${CaptionDisplay.text(message.body)}”", color = Ink, fontFamily = Poppins, fontWeight = FontWeight.Bold, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
         Text("On-device AI", color = CyanText, fontFamily = Poppins, fontWeight = FontWeight.SemiBold, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp).clip(CircleShape).background(CyanLight).padding(horizontal = 8.dp, vertical = 2.dp))
+        if (mine) {
+            Text(
+                Delivery.label(message.delivery, message.relayHops),
+                color = InkSoft,
+                fontFamily = Poppins,
+                fontSize = 10.sp,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
     }
 }
 

@@ -39,5 +39,8 @@
     kotlinx.serialization.KSerializer serializer(...);
 }
 
+-keep class org.bouncycastle.** { *; }
+-dontwarn org.bouncycastle.**
+
 -keep class ph.appbuilders.saklolo.model.** { *; }
 -keep class ph.appbuilders.saklolo.data.** { *; }

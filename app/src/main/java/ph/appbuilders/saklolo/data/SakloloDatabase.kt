@@ -144,6 +144,7 @@ data class ContactEntity(
     val favorite: Boolean,
     val lastHeardMillis: Long,
     val saved: Boolean,
+    val publicKey: String = "",
 )
 
 @Entity(tableName = "direct_messages")
@@ -158,6 +159,12 @@ data class DirectEntity(
     val kind: String,
     val audioPath: String?,
     val localOrigin: Boolean,
+    val box: String = "",
+    val delivery: String = "sending",
+    val relayHops: Int = 0,
+    val clipBytes: Int = 0,
+    val expireAtMillis: Long = 0L,
+    val clipPath: String? = null,
 )
 
 @Dao
@@ -198,7 +205,7 @@ interface DirectDao {
         ContactEntity::class,
         DirectEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = false,
 )
 abstract class SakloloDatabase : RoomDatabase() {
@@ -210,6 +217,18 @@ abstract class SakloloDatabase : RoomDatabase() {
 val MIGRATION_1_2 = object : Migration(1, 2) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE alerts ADD COLUMN responding INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
+val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE contacts ADD COLUMN publicKey TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE direct_messages ADD COLUMN box TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE direct_messages ADD COLUMN delivery TEXT NOT NULL DEFAULT 'sending'")
+        db.execSQL("ALTER TABLE direct_messages ADD COLUMN relayHops INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE direct_messages ADD COLUMN clipBytes INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE direct_messages ADD COLUMN expireAtMillis INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE direct_messages ADD COLUMN clipPath TEXT")
     }
 }
 
@@ -357,7 +376,7 @@ class RoomDirectPersistence(private val database: SakloloDatabase) : DirectPersi
         val dao = database.direct()
         return DirectSnapshot(
             contacts = dao.contacts().map {
-                SavedContact(it.deviceId, it.name, it.addedAtMillis, it.favorite, it.lastHeardMillis, it.saved)
+                SavedContact(it.deviceId, it.name, it.addedAtMillis, it.favorite, it.lastHeardMillis, it.saved, it.publicKey)
             },
             messages = dao.messages().map {
                 DirectMessage(
@@ -371,6 +390,12 @@ class RoomDirectPersistence(private val database: SakloloDatabase) : DirectPersi
                     kind = it.kind,
                     audioPath = it.audioPath,
                     localOrigin = it.localOrigin,
+                    box = it.box,
+                    delivery = it.delivery,
+                    relayHops = it.relayHops,
+                    clipBytes = it.clipBytes,
+                    expireAtMillis = it.expireAtMillis,
+                    clipPath = it.clipPath,
                 )
             },
         )
@@ -379,7 +404,7 @@ class RoomDirectPersistence(private val database: SakloloDatabase) : DirectPersi
     override fun save(snapshot: DirectSnapshot) {
         database.direct().replaceAll(
             snapshot.contacts.map {
-                ContactEntity(it.deviceId, it.name, it.addedAtMillis, it.favorite, it.lastHeardMillis, it.saved)
+                ContactEntity(it.deviceId, it.name, it.addedAtMillis, it.favorite, it.lastHeardMillis, it.saved, it.publicKey)
             },
             snapshot.messages.map {
                 DirectEntity(
@@ -393,6 +418,12 @@ class RoomDirectPersistence(private val database: SakloloDatabase) : DirectPersi
                     kind = it.kind,
                     audioPath = it.audioPath,
                     localOrigin = it.localOrigin,
+                    box = it.box,
+                    delivery = it.delivery,
+                    relayHops = it.relayHops,
+                    clipBytes = it.clipBytes,
+                    expireAtMillis = it.expireAtMillis,
+                    clipPath = it.clipPath,
                 )
             },
         )

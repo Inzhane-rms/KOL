@@ -16,7 +16,7 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = 1
-        versionName = "0.11.0"
+        versionName = "0.12.0"
         ndk {
             // Phones at the demo are arm64. x86_64 covers an emulator.
             abiFilters += listOf("arm64-v8a", "x86_64")
@@ -151,6 +151,7 @@ dependencies {
     implementation("androidx.room:room-ktx:2.6.1")
     ksp("androidx.room:room-compiler:2.6.1")
     implementation("com.google.mediapipe:tasks-genai:0.10.27")
+    implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
 
     testImplementation("junit:junit:4.13.2")
     debugImplementation("androidx.compose.ui:ui-tooling")
