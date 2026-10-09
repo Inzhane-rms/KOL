@@ -8,15 +8,24 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Looper
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 object DeviceLocation {
     @Volatile
     private var latest: Pair<Double, Double>? = null
 
+    private val _fixes = MutableStateFlow<Pair<Double, Double>?>(null)
+    val fixes: StateFlow<Pair<Double, Double>?> = _fixes.asStateFlow()
+
     private var listening = false
 
     fun lastKnown(context: Context): Pair<Double, Double>? {
-        latest?.let { return it }
+        latest?.let {
+            _fixes.value = it
+            return it
+        }
         if (!hasPermission(context)) return null
         val manager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
         val providers = listOf(
@@ -57,6 +66,7 @@ object DeviceLocation {
     private fun store(location: Location): Pair<Double, Double> {
         val pair = location.latitude to location.longitude
         latest = pair
+        _fixes.value = pair
         return pair
     }
 

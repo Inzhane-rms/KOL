@@ -9,6 +9,8 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.RoomDatabase
 import androidx.room.Transaction
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import ph.appbuilders.saklolo.model.Alert
 import ph.appbuilders.saklolo.model.AlertFile
 import ph.appbuilders.saklolo.model.AlertPersistence
@@ -29,6 +31,7 @@ data class AlertEntity(
     val audioPath: String?,
     val localOrigin: Boolean,
     val deliveredCount: Int,
+    val responding: Boolean,
 )
 
 @Dao
@@ -49,9 +52,15 @@ interface AlertDao {
     }
 }
 
-@Database(entities = [AlertEntity::class], version = 1, exportSchema = false)
+@Database(entities = [AlertEntity::class], version = 2, exportSchema = false)
 abstract class SakloloDatabase : RoomDatabase() {
     abstract fun alerts(): AlertDao
+}
+
+val MIGRATION_1_2 = object : Migration(1, 2) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE alerts ADD COLUMN responding INTEGER NOT NULL DEFAULT 0")
+    }
 }
 
 class RoomAlertPersistence(private val database: SakloloDatabase) : AlertPersistence {
@@ -80,6 +89,7 @@ private fun AlertEntity.toAlert() = Alert(
     summarySource = summarySource,
     audioPath = audioPath,
     deliveredCount = deliveredCount,
+    responding = responding,
 )
 
 private fun Alert.toEntity(localOrigin: Boolean) = AlertEntity(
@@ -96,4 +106,5 @@ private fun Alert.toEntity(localOrigin: Boolean) = AlertEntity(
     audioPath = audioPath,
     localOrigin = localOrigin,
     deliveredCount = deliveredCount,
+    responding = responding,
 )

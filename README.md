@@ -14,6 +14,7 @@ During a typhoon, a person may have no mobile signal. They hold the SOS button a
 | Phone-to-phone relay | Google Nearby Connections, strategy `P2P_CLUSTER`, store-and-forward, deduped by alert id, hop limit 5. The voice clip is a Nearby FILE payload linked to the alert id. | None (radios only) |
 | Fallback share | QR code of the alert summary | None |
 | Alert log | Room database on the phone, so the feed survives relaunch | None |
+| Ask B-LINK | Bundled Tagalog and English safety answers. A medical phrase opens the SOS recorder instead of a tip. | None |
 
 The speech model is **bundled in the APK**. Gradle downloads `ggml-base-q5_1.bin` at build time into `app/src/main/assets/models/` (gitignored). On first launch the app copies that asset into private storage and checks its SHA-256. Transcription code never opens a socket.
 
@@ -81,7 +82,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 `./gradlew testDebugUnitTest` and `./gradlew assembleRelease` are the checks for this tree. There was no handset and no Android emulator here, so the microphone, GPS, Nearby hop, foreground notification, Room restore after process death, Gemma load, and voice-clip playback were **not** run on a phone.
 
-Unit tests cover Tagalog, Bisaya, and English triage, direct receipt stored as **1 hop**, hop limit, dedupe, QR, JSON (audio path stays off the wire), Bisaya whisper code `tl`, the peer-name allowlist, the endpoint lock bookkeeping, the summary chooser, the Gemma load retry policy, and the WAV header.
+Unit tests cover Tagalog, Bisaya, and English triage, direct receipt stored as **1 hop**, hop limit, dedupe, QR, JSON (audio path stays off the wire), Bisaya whisper code `tl`, the peer-name allowlist, the endpoint lock bookkeeping, the summary chooser, the Gemma load retry policy, the Ask safety bank, and the WAV header.
 
 The offline speech path was checked earlier on this model file with whisper.cpp's `whisper-cli` (v1.9.5) on this Linux machine. See `docs/PLAN.md`. That check is not re-run on every build.
 
@@ -103,10 +104,11 @@ Nearby Connections uses Google Play Services. A phone without Play Services can 
 
 ## Project layout
 
-- `app/src/main/java/ph/appbuilders/saklolo/ui` — recorder, responder feed, green theme
+- `app/src/main/java/ph/appbuilders/saklolo/ui` — recorder, Ask B-LINK, responder feed, light v12 layout
+- `ask` — offline safety Q&A. Answers are the bundled sentences, not generated text
 - `stt` — whisper.cpp JNI, 16 kHz recorder, model install
 - `triage` — keyword summary and urgency
-- `summary` — optional Gemma refinement
+- `summary` — optional Gemma refinement, and an optional Ask pair-id pick
 - `relay` — foreground service, Nearby store-and-forward, voice-clip files, QR codec
 - `data` — Room log
 - `docs/PLAN.md` — decisions
@@ -120,8 +122,9 @@ Everything below is part of how B-LINK was built or how it runs. The on-device p
 **Models**
 
 - OpenAI Whisper multilingual **base**, file `ggml-base-q5_1.bin` (SHA-256 `422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898`), converted to ggml by the whisper.cpp project and published at `ggerganov/whisper.cpp` on Hugging Face. Whisper weights are MIT.
-- Google **Gemma 3 1B** int4 (`.task`), sideloaded by the person installing the demo, not bundled. Used only through MediaPipe LLM Inference, and only to refine the one-line summary. Gemma is used under Google's Gemma Terms of Use. If the file is absent, this model does not run.
+- Google **Gemma 3 1B** int4 (`.task`), sideloaded by the person installing the demo, not bundled. Used only through MediaPipe LLM Inference. It loads in the background at app start when the file exists and the phone reports at least 3.4 GiB of RAM. The 15 second limit wraps inference only. On the recorder it may refine the one-line summary. On Ask B-LINK, if the keyword match misses and the model is already loaded, it may return a stored pair id or `NONE`. That id is accepted only when it is one of the bundled pairs. Gemma's own words are never shown. One failure is retried on the next alert. Gemma is used under Google's Gemma Terms of Use. If the file is absent, this model does not run.
 - Keyword and phrase classifier in `TriageEngine.kt` for urgency and for the fallback summary.
+- Ask B-LINK bank, `app/src/main/assets/ask/ask_blink_qa.json`, bundled in the APK. Eighteen Tagalog and English answers drawn from the Philippine government Disaster Preparedness & First Aid Handbook (climate.gov.ph) and UNICEF Philippines emergency preparedness tips. Thirty-two medical phrases skip the tip and open the SOS recorder. The no-match line is the stored fallback, not a generated sentence.
 
 **Speech runtime**
 

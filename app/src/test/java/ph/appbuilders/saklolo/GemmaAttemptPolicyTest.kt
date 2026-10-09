@@ -84,6 +84,20 @@ class GemmaAttemptPolicyTest {
     }
 
     @Test
+    fun aRunningInferenceIsNotStartedAgain() {
+        val policy = readyPolicy()
+        assertTrue(policy.tryBeginInference())
+        assertTrue(policy.isInferenceRunning())
+        assertFalse(policy.tryBeginInference())
+        policy.noteInferenceTimeout()
+        assertTrue(policy.isInferenceRunning())
+        assertFalse(policy.gaveUp)
+        policy.finishInference()
+        assertFalse(policy.isInferenceRunning())
+        assertTrue(policy.tryBeginInference())
+    }
+
+    @Test
     fun missingFileOrLowRamSkipsEvenWhenTheEngineExists() {
         val policy = readyPolicy()
         assertEquals(GemmaRefinePlan.SKIP, policy.plan(eligible = false, engineReady = true))

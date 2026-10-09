@@ -7,105 +7,145 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.ChatBubble
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import kotlinx.coroutines.CancellationException
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import ph.appbuilders.saklolo.triage.Urgency
-import ph.appbuilders.saklolo.ui.theme.HelpAmber
-import ph.appbuilders.saklolo.ui.theme.HelpInk
+import kotlin.math.cos
+import kotlin.math.sin
+import ph.appbuilders.saklolo.stt.PcmRecorder
+import ph.appbuilders.saklolo.ui.theme.Accent
 import ph.appbuilders.saklolo.ui.theme.Ink
-import ph.appbuilders.saklolo.ui.theme.CriticalRed
-import ph.appbuilders.saklolo.ui.theme.OrbDeep
-import ph.appbuilders.saklolo.ui.theme.RingPink
-import ph.appbuilders.saklolo.ui.theme.SafeGreen
+import ph.appbuilders.saklolo.ui.theme.InkSoft
+import ph.appbuilders.saklolo.ui.theme.ShadowInk
 
-fun Modifier.glass(corner: Dp = 24.dp): Modifier {
-    val shape = RoundedCornerShape(corner)
-    return this
-        .shadow(12.dp, shape, ambientColor = Color.Black.copy(alpha = 0.35f), spotColor = Color.Black.copy(alpha = 0.35f))
+private val CardShape = RoundedCornerShape(28.dp)
+private val ShadowSpot = ShadowInk.copy(alpha = 0.10f)
+private val ButtonShadow = ShadowInk.copy(alpha = 0.35f)
+
+fun Modifier.softCard(shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(24.dp)): Modifier =
+    this
+        .shadow(6.dp, shape, ambientColor = ShadowSpot, spotColor = ShadowSpot)
         .clip(shape)
-        .background(Color.White.copy(alpha = 0.94f))
-        .border(1.dp, Color.White.copy(alpha = 0.5f), shape)
-}
+        .background(Color.White)
+
+fun Modifier.flatCard(color: Color = Color.White, shape: androidx.compose.ui.graphics.Shape = CardShape): Modifier =
+    this
+        .fillMaxWidth()
+        .softCard(shape)
+        .background(color)
 
 @Composable
-fun UrgencyChip(urgency: Urgency) {
-    val background: Color
-    val foreground: Color
-    val border: Color
-    when (urgency) {
-        Urgency.CRITICAL -> {
-            background = CriticalRed
-            foreground = Color.White
-            border = Color.Transparent
-        }
-        Urgency.NEEDS_HELP -> {
-            background = HelpAmber
-            foreground = HelpInk
-            border = Color.Transparent
-        }
-        Urgency.SAFE -> {
-            background = Color.White
-            foreground = SafeGreen
-            border = SafeGreen
-        }
-    }
+fun RoundArrow(
+    background: Color,
+    tint: Color,
+    description: String?,
+    onClick: (() -> Unit)? = null,
+    diameter: Dp = 36.dp,
+) {
+    val base = Modifier
+        .size(diameter)
+        .clip(CircleShape)
+        .background(background)
     Box(
-        modifier = Modifier
-            .height(32.dp)
-            .border(if (urgency == Urgency.SAFE) 2.dp else 0.dp, border, CircleShape)
-            .background(background, CircleShape)
-            .padding(horizontal = 12.dp),
+        modifier = if (onClick != null && description != null) base.clickable(onClick = onClick) else base,
         contentAlignment = Alignment.Center,
     ) {
-        Text(urgency.label, color = foreground, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        Icon(
+            Icons.AutoMirrored.Filled.ArrowForward,
+            contentDescription = if (onClick != null) description else null,
+            tint = tint,
+            modifier = Modifier.size(18.dp),
+        )
     }
 }
 
 @Composable
-fun SourcePill(source: String) {
-    Text(
-        text = sourceLabel(source),
-        color = Ink,
-        fontSize = 14.sp,
+fun InfoCard(
+    background: Color,
+    label: String,
+    title: String,
+    details: String,
+    ink: Color,
+    detailsColor: Color = ink,
+    arrowBackground: Color,
+    arrowTint: Color,
+    arrowDescription: String?,
+    onArrow: (() -> Unit)?,
+    minHeight: Dp = 0.dp,
+    extra: @Composable (() -> Unit)? = null,
+) {
+    Column(
         modifier = Modifier
-            .border(1.dp, Ink.copy(alpha = 0.45f), CircleShape)
-            .padding(horizontal = 10.dp, vertical = 4.dp),
-    )
+            .flatCard(background)
+            .heightIn(min = minHeight)
+            .padding(horizontal = 16.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(label, color = ink, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text(title, color = ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                if (details.isNotEmpty()) {
+                    Text(details, color = detailsColor, fontSize = 14.sp)
+                }
+            }
+            RoundArrow(arrowBackground, arrowTint, arrowDescription, onArrow)
+        }
+        extra?.invoke()
+    }
 }
 
 @Composable
@@ -115,89 +155,134 @@ fun SosOrb(
     enabled: Boolean,
     onHoldStart: () -> Unit,
     onHoldEnd: () -> Unit,
+    dimmed: Boolean = false,
 ) {
     var pressed by remember { mutableStateOf(false) }
+    val recordingNow by rememberUpdatedState(recording)
+    val enabledNow by rememberUpdatedState(enabled)
+    val startNow by rememberUpdatedState(onHoldStart)
+    val endNow by rememberUpdatedState(onHoldEnd)
     val pressScale by animateFloatAsState(
-        targetValue = if (pressed) 0.95f else 1f,
+        targetValue = if (pressed) 0.96f else 1f,
         animationSpec = tween(100),
         label = "press",
     )
-    val pulseMs = if (recording) 800 else 1600
     val easeOut = CubicBezierEasing(0f, 0f, 0.2f, 1f)
     val transition = rememberInfiniteTransition(label = "pulse")
     val ring1 by transition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(pulseMs, easing = easeOut), RepeatMode.Restart),
+        animationSpec = infiniteRepeatable(tween(1400, easing = easeOut), RepeatMode.Restart),
         label = "ring1",
     )
     val ring2 by transition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            tween(pulseMs, delayMillis = pulseMs / 2, easing = easeOut),
-            RepeatMode.Restart,
-        ),
+        animationSpec = infiniteRepeatable(tween(1400, delayMillis = 700, easing = easeOut), RepeatMode.Restart),
         label = "ring2",
     )
-    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(260.dp)) {
-        PulseRing(ring1)
-        PulseRing(ring2)
-        BoxWithConstraints(
-            modifier = Modifier
-                .size(220.dp)
-                .scale(pressScale)
-                .shadow(24.dp, CircleShape, ambientColor = OrbDeep, spotColor = OrbDeep)
+    val fraction = if (recording) elapsedSec / PcmRecorder.MAX_SECONDS.toFloat() else 0f
+    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(280.dp)) {
+        PulseDisc(ring1, 280.dp, 0.05f)
+        PulseDisc(ring2, 248.dp, 0.09f)
+        Box(
+            Modifier
+                .size(216.dp)
+                .shadow(18.dp, CircleShape, ambientColor = ButtonShadow, spotColor = ButtonShadow)
                 .clip(CircleShape)
-                .pointerInput(enabled, recording) {
-                    if (!enabled && !recording) return@pointerInput
-                    detectTapGestures(
-                        onPress = {
-                            pressed = true
-                            if (!recording) onHoldStart()
-                            tryAwaitRelease()
+                .background(Brush.verticalGradient(listOf(Color.White, Color(0xFFC9CDD6)))),
+        )
+        Canvas(Modifier.size(216.dp)) {
+            if (fraction <= 0f) return@Canvas
+            val stroke = 5.dp.toPx()
+            val inset = stroke / 2f
+            drawArc(
+                color = Accent,
+                startAngle = -90f,
+                sweepAngle = 360f * fraction.coerceIn(0f, 1f),
+                useCenter = false,
+                topLeft = Offset(inset, inset),
+                size = Size(size.width - stroke, size.height - stroke),
+                style = Stroke(width = stroke, cap = StrokeCap.Round),
+            )
+            val angle = Math.toRadians((-90.0 + 360.0 * fraction.coerceIn(0f, 1f)))
+            val radius = size.minDimension / 2f - inset
+            val center = Offset(
+                size.width / 2f + (cos(angle) * radius).toFloat(),
+                size.height / 2f + (sin(angle) * radius).toFloat(),
+            )
+            drawCircle(Color.White, 8.dp.toPx(), center)
+            drawCircle(Accent, 5.dp.toPx(), center)
+        }
+        Box(
+            modifier = Modifier
+                .size(184.dp)
+                .scale(pressScale)
+                .alpha(if (dimmed) 0.5f else 1f)
+                .shadow(8.dp, CircleShape, ambientColor = ButtonShadow, spotColor = ButtonShadow)
+                .clip(CircleShape)
+                .background(
+                    Brush.radialGradient(listOf(Color(0xFFFF4B4B), Accent, Color(0xFFB5161C))),
+                )
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        if (!(enabledNow || recordingNow)) return@awaitEachGesture
+                        down.consume()
+                        pressed = true
+                        if (!recordingNow) startNow()
+                        val width = size.width.toFloat()
+                        val height = size.height.toFloat()
+                        try {
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Main)
+                                event.changes.forEach { it.consume() }
+                                val change = event.changes.firstOrNull { it.id == down.id }
+                                if (change == null) {
+                                    if (shouldEndSosHold(pointerPressed = true, outOfBounds = false, cancelled = true)) {
+                                        break
+                                    }
+                                    continue
+                                }
+                                val outside = change.position.x < 0f ||
+                                    change.position.y < 0f ||
+                                    change.position.x > width ||
+                                    change.position.y > height
+                                if (shouldEndSosHold(change.pressed, outside, cancelled = false)) break
+                            }
+                        } catch (cancelled: CancellationException) {
                             pressed = false
-                            onHoldEnd()
-                        },
-                    )
+                            if (shouldEndSosHold(pointerPressed = true, outOfBounds = false, cancelled = true)) {
+                                endNow()
+                            }
+                            throw cancelled
+                        }
+                        pressed = false
+                        endNow()
+                    }
                 },
+            contentAlignment = Alignment.Center,
         ) {
-            val widthPx = constraints.maxWidth.toFloat()
-            val heightPx = constraints.maxHeight.toFloat()
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.radialGradient(
-                            colorStops = arrayOf(
-                                0f to Color(0xFFFF8A80),
-                                0.45f to Color(0xFFE53935),
-                                1f to Color(0xFF7F1D1D),
-                            ),
-                            center = Offset(widthPx * 0.38f, heightPx * 0.32f),
-                            radius = widthPx * 0.85f,
-                        ),
-                    ),
-            )
-            Box(
-                Modifier
-                    .align(Alignment.TopCenter)
-                    .offset(y = 18.dp)
-                    .size(width = 120.dp, height = 48.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(Color.White.copy(alpha = 0.55f), Color.Transparent),
-                        ),
-                    ),
-            )
-            Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text = if (recording) "%02d:%02d".format(elapsedSec / 60, elapsedSec % 60) else "SOS",
-                    color = Color.White,
-                    fontSize = if (recording) 32.sp else 40.sp,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center,
+            Canvas(Modifier.size(64.dp)) {
+                val c = Offset(size.width / 2f, size.height / 2f)
+                drawCircle(Color.White, 5.dp.toPx(), c)
+                drawArc(
+                    Color.White,
+                    startAngle = -60f,
+                    sweepAngle = 120f,
+                    useCenter = false,
+                    topLeft = Offset(c.x - 14.dp.toPx(), c.y - 14.dp.toPx()),
+                    size = Size(28.dp.toPx(), 28.dp.toPx()),
+                    style = Stroke(3.dp.toPx(), cap = StrokeCap.Round),
+                )
+                drawArc(
+                    Color.White,
+                    startAngle = -50f,
+                    sweepAngle = 100f,
+                    useCenter = false,
+                    topLeft = Offset(c.x - 24.dp.toPx(), c.y - 24.dp.toPx()),
+                    size = Size(48.dp.toPx(), 48.dp.toPx()),
+                    style = Stroke(3.dp.toPx(), cap = StrokeCap.Round),
                 )
             }
         }
@@ -205,49 +290,99 @@ fun SosOrb(
 }
 
 @Composable
-private fun PulseRing(progress: Float) {
-    val scale = 1f + (0.35f * progress)
-    val alpha = 0.6f * (1f - progress)
+private fun PulseDisc(progress: Float, diameter: Dp, baseAlpha: Float) {
     Box(
         Modifier
-            .size(220.dp)
-            .scale(scale)
-            .border(3.dp, RingPink.copy(alpha = alpha), CircleShape),
+            .size(diameter)
+            .scale(1f + 0.15f * progress)
+            .clip(CircleShape)
+            .background(Accent.copy(alpha = baseAlpha * (1f - progress))),
     )
 }
 
 @Composable
-fun BottomSwitcher(recordSelected: Boolean, onRecord: () -> Unit, onFeed: () -> Unit) {
+fun BottomSwitcher(
+    route: String,
+    alertBadge: Int,
+    onRecord: () -> Unit,
+    onAsk: () -> Unit,
+    onFeed: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .navigationBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 12.dp)
-            .height(56.dp)
-            .clip(RoundedCornerShape(28.dp))
-            .background(Color.White.copy(alpha = 0.16f))
-            .padding(4.dp),
+            .padding(start = 20.dp, end = 20.dp, bottom = 16.dp)
+            .fillMaxWidth()
+            .height(68.dp)
+            .shadow(10.dp, RoundedCornerShape(34.dp), ambientColor = ShadowSpot, spotColor = ShadowSpot)
+            .clip(RoundedCornerShape(34.dp))
+            .background(Color.White)
+            .padding(8.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        SwitchTab("Record", recordSelected, Modifier.weight(1f), onRecord)
-        SwitchTab("Responder feed", !recordSelected, Modifier.weight(1f), onFeed)
+        NavTab("Record", Icons.Filled.Mic, route == "record", 0, Modifier.weight(1f), onRecord)
+        NavTab("Alerts", Icons.Filled.Notifications, route == "feed", alertBadge, Modifier.weight(1f), onFeed)
+        NavTab("Ask", Icons.Filled.ChatBubble, route == "ask", 0, Modifier.weight(1f), onAsk)
     }
 }
 
 @Composable
-private fun SwitchTab(label: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
+private fun NavTab(
+    label: String,
+    icon: ImageVector,
+    selected: Boolean,
+    badge: Int,
+    modifier: Modifier,
+    onClick: () -> Unit,
+) {
+    val ink = if (selected) Color.White else InkSoft
     Box(
         modifier = modifier
-            .height(48.dp)
-            .clip(RoundedCornerShape(24.dp))
-            .background(if (selected) Color.White else Color.Transparent)
+            .height(52.dp)
+            .clip(RoundedCornerShape(26.dp))
+            .background(if (selected) Accent else Color.Transparent)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = label,
-            color = if (selected) Ink else Color.White,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold,
-        )
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box {
+                Icon(icon, contentDescription = null, tint = ink, modifier = Modifier.size(18.dp))
+                if (badge > 0) {
+                    val count = if (badge > 9) "9+" else badge.toString()
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .offset(x = 8.dp, y = (-6).dp)
+                            .size(16.dp)
+                            .clip(CircleShape)
+                            .background(if (selected) Color.White else Accent),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = count,
+                            color = if (selected) Accent else Color.White,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+            }
+            Text(label, color = ink, fontSize = 11.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
+        }
+    }
+}
+
+@Composable
+fun PlayButton(onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(28.dp)
+            .clip(CircleShape)
+            .background(Accent)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(Icons.Filled.PlayArrow, contentDescription = "Play voice clip", tint = Color.White, modifier = Modifier.size(16.dp))
     }
 }

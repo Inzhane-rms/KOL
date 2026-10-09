@@ -4,6 +4,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import kotlin.math.abs
 
 /** 16 kHz mono 16-bit PCM WAV. Caps the clip at 30 seconds. */
 object WavPcm {
@@ -43,5 +44,30 @@ object WavPcm {
     fun clipFile(dir: File, alertId: String): File {
         val safe = alertId.replace(Regex("[^A-Za-z0-9._-]"), "_")
         return File(dir, "$safe.wav")
+    }
+
+    /** Peak amplitude in each bucket, scaled to 0.08..1. Empty when the file is not a clip. */
+    fun peakBars(file: File, bars: Int = 28): List<Float> {
+        if (bars <= 0 || !file.exists() || file.length() <= HEADER_BYTES) return emptyList()
+        val data = file.readBytes()
+        val samples = (data.size - HEADER_BYTES) / 2
+        if (samples <= 0) return emptyList()
+        val peaks = FloatArray(bars)
+        val buffer = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN)
+        for (i in 0 until samples) {
+            val sample = buffer.getShort(HEADER_BYTES + i * 2).toInt()
+            val bucket = (i.toLong() * bars / samples).toInt().coerceIn(0, bars - 1)
+            val amp = abs(sample) / 32767f
+            if (amp > peaks[bucket]) peaks[bucket] = amp
+        }
+        val max = peaks.maxOrNull()?.takeIf { it > 0f } ?: return List(bars) { 0.08f }
+        return peaks.map { (it / max).coerceIn(0.08f, 1f) }
+    }
+
+    fun durationLabel(file: File): String {
+        if (!file.exists() || file.length() <= HEADER_BYTES) return "0:00"
+        val samples = (file.length() - HEADER_BYTES) / 2
+        val sec = (samples / SAMPLE_RATE).toInt()
+        return "%d:%02d".format(sec / 60, sec % 60)
     }
 }

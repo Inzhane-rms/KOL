@@ -6,7 +6,9 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import ph.appbuilders.saklolo.audio.WavPcm
 import ph.appbuilders.saklolo.model.Alert
+import ph.appbuilders.saklolo.ui.alertProgress
 import ph.appbuilders.saklolo.model.AlertJson
 import ph.appbuilders.saklolo.model.AlertStore
 import ph.appbuilders.saklolo.model.ClipLink
@@ -79,18 +81,62 @@ class RelayAndQrTest {
                 summarySource = "AI",
                 audioPath = "/secret/clip.wav",
                 deliveredCount = 3,
+                responding = true,
             ),
         )
         val encoded = AlertJson.encodeEnvelope(alerts, listOf(ClipLink("x", 42L)))
         assertFalse(encoded.contains("audioPath"))
         assertFalse(encoded.contains("/secret"))
         assertFalse(encoded.contains("deliveredCount"))
+        assertFalse(encoded.contains("responding"))
         val decoded = AlertJson.decodeEnvelope(encoded)
         assertEquals("AI", decoded.alerts.single().summarySource)
         assertNull(decoded.alerts.single().audioPath)
         assertEquals(0, decoded.alerts.single().deliveredCount)
+        assertFalse(decoded.alerts.single().responding)
         assertEquals(42L, decoded.clips.single().payloadId)
-        assertEquals(alerts.single().copy(audioPath = null, deliveredCount = 0), decoded.alerts.single())
+        assertEquals(
+            alerts.single().copy(audioPath = null, deliveredCount = 0, responding = false),
+            decoded.alerts.single(),
+        )
+    }
+
+    @Test
+    fun respondingStaysOnThisPhone() {
+        val file = File.createTempFile("respond", ".json")
+        val store = AlertStore(file)
+        store.addLocal(alert("a", Urgency.CRITICAL, hops = 0, at = 1))
+        store.setResponding("a", true)
+        assertTrue(store.find("a")!!.responding)
+        assertTrue(AlertStore(file).find("a")!!.responding)
+        val encoded = AlertJson.encodeEnvelope(listOf(store.find("a")!!))
+        assertFalse(encoded.contains("responding"))
+        assertFalse(AlertJson.decodeEnvelope(encoded).alerts.single().responding)
+    }
+
+    @Test
+    fun queuedSendIsSentNotDelivered() {
+        assertEquals(false, alertProgress(localOrigin = true, deliveredCount = 0).sent)
+        assertEquals(true, alertProgress(localOrigin = true, deliveredCount = 0).recorded)
+        val queued = alertProgress(localOrigin = true, deliveredCount = 2)
+        assertEquals(true, queued.sent)
+        assertEquals(false, queued.delivered)
+        assertEquals(false, alertProgress(localOrigin = false, deliveredCount = 1).recorded)
+    }
+
+    @Test
+    fun waveformFollowsTheClip() {
+        val dir = File.createTempFile("clip", ".dir")
+        dir.delete()
+        dir.mkdirs()
+        val file = WavPcm.clipFile(dir, "a")
+        val samples = FloatArray(16_000) { index -> if (index < 8_000) 0.8f else 0.1f }
+        WavPcm.write(file, samples)
+        val bars = WavPcm.peakBars(file, 4)
+        assertEquals(4, bars.size)
+        assertTrue(bars[0] > bars[3])
+        assertEquals("0:01", WavPcm.durationLabel(file))
+        assertTrue(WavPcm.peakBars(File(dir, "missing.wav")).isEmpty())
     }
 
     private fun alert(id: String, urgency: Urgency, hops: Int, at: Long) = Alert(

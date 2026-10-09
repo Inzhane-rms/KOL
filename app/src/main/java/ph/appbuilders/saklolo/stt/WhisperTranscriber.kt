@@ -1,37 +1,80 @@
 package ph.appbuilders.saklolo.stt
 
+import android.util.Log
 import java.io.File
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.withContext
 
+internal interface WhisperEngine {
+    fun initContext(modelPath: String): Long
+    fun freeContext(contextPtr: Long)
+    fun transcribe(contextPtr: Long, audio: FloatArray, threads: Int, language: String): String?
+}
+
+private object JniWhisperEngine : WhisperEngine {
+    override fun initContext(modelPath: String): Long = WhisperNative.initContext(modelPath)
+
+    override fun freeContext(contextPtr: Long) {
+        WhisperNative.freeContext(contextPtr)
+    }
+
+    override fun transcribe(contextPtr: Long, audio: FloatArray, threads: Int, language: String): String? =
+        WhisperNative.transcribe(contextPtr, audio, threads, language)
+}
+
 /**
- * Runs whisper.cpp on one thread. The C context must not be used concurrently.
+ * Runs whisper.cpp on one thread. The C context must not be used concurrently,
+ * and [release] frees it on that same thread after any in-flight transcription.
  */
-class WhisperTranscriber(private val modelFile: File) {
-    private val dispatcher = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "saklolo-whisper").apply { priority = Thread.NORM_PRIORITY }
-    }.asCoroutineDispatcher()
+class WhisperTranscriber internal constructor(
+    private val modelFile: File,
+    private val engine: WhisperEngine,
+    private val executor: ExecutorService,
+) {
+    constructor(modelFile: File) : this(modelFile, JniWhisperEngine, whisperWorker())
+
+    private val dispatcher = executor.asCoroutineDispatcher()
+    private val released = AtomicBoolean(false)
     private var contextPtr: Long = 0
 
     suspend fun transcribe(pcm16k: FloatArray, languageCode: String): String = withContext(dispatcher) {
+        if (released.get()) error("Speech model was released")
         if (contextPtr == 0L) {
-            contextPtr = WhisperNative.initContext(modelFile.absolutePath)
+            contextPtr = engine.initContext(modelFile.absolutePath)
             if (contextPtr == 0L) {
                 error("Could not load the on-device speech model")
             }
         }
         val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
-        WhisperNative.transcribe(contextPtr, pcm16k, threads, languageCode)
+        engine.transcribe(contextPtr, pcm16k, threads, languageCode)
             ?.trim()
             .orEmpty()
     }
 
     fun release() {
-        val ptr = contextPtr
-        contextPtr = 0
-        if (ptr != 0L) {
-            WhisperNative.freeContext(ptr)
+        if (!released.compareAndSet(false, true)) return
+        executor.execute {
+            val ptr = contextPtr
+            contextPtr = 0
+            if (ptr != 0L) {
+                try {
+                    engine.freeContext(ptr)
+                } catch (error: Exception) {
+                    Log.w(TAG, "whisper free failed", error)
+                }
+            }
+            executor.shutdown()
         }
     }
+
+    private companion object {
+        const val TAG = "WhisperTranscriber"
+    }
+}
+
+private fun whisperWorker(): ExecutorService = Executors.newSingleThreadExecutor { runnable ->
+    Thread(runnable, "saklolo-whisper").apply { priority = Thread.NORM_PRIORITY }
 }

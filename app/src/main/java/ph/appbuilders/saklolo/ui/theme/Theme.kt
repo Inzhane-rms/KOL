@@ -10,33 +10,52 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import ph.appbuilders.saklolo.triage.Urgency
 
-val ForestDeep = Color(0xFF022C22)
+val Page = Color(0xFFEDEFF4)
+val Ink = Color(0xFF1F2433)
+/** Darkened from #8A90A0 so body text stays at least 4.5:1 on the page and on white. */
+val InkSoft = Color(0xFF5E6472)
+val Accent = Color(0xFFE3242B)
+/** Darkened red for text on the light-red card. #E3242B on #FDE8E8 is under 4.5. */
+val AccentDeep = Color(0xFFB5161C)
+val LightRed = Color(0xFFFDE8E8)
+val StatusGreen = Color(0xFF059669)
+/** Darkened from #059669 so green words pass 4.5:1 on white. The status dot stays StatusGreen. */
+val GreenText = Color(0xFF047857)
+val Amber = Color(0xFFF59E0B)
+val SafeTint = Color(0xFF16A34A)
+val Hairline = Color(0xFFE3E6EC)
+val PillAmberBg = Color(0xFFFEF3C7)
+val PillAmberText = Color(0xFF92400E)
+val NearSecondary = Color(0xFFA6ABB8)
+val ShadowInk = Color(0xFF5A6075)
+val ChipWash = Color(0xFFF1F2F6)
+val PlayerWash = Color(0xFFF4F5F8)
+
+val CriticalRed = Accent
 val ForestMid = Color(0xFF065F46)
-val ForestMint = Color(0xFF10B981)
-val Ink = Color(0xFF0B2E22)
-val InkSoft = Color(0xFF3F5A50)
-val CriticalRed = Color(0xFFC62828)
-val HelpAmber = Color(0xFFF9A825)
-val HelpInk = Color(0xFF111111)
+val ForestMint = StatusGreen
+val MintWash = Color(0xFFF4F5F8)
 val SafeGreen = Color(0xFF1B5E20)
-val OrbDeep = Color(0xFF450A0A)
-val RingPink = Color(0xFFFCA5A5)
+val SafeCard = Color(0xFF15803D)
+val HelpAmber = Amber
+val HelpInk = Ink
+val RingPink = LightRed
 
 private val Colors = lightColorScheme(
-    primary = SafeGreen,
+    primary = Accent,
     onPrimary = Color.White,
-    background = ForestDeep,
-    onBackground = Color.White,
+    background = Page,
+    onBackground = Ink,
     surface = Color.White,
     onSurface = Ink,
     onSurfaceVariant = InkSoft,
 )
 
 private val Type = Typography(
-    bodyLarge = TextStyle(fontSize = 18.sp, lineHeight = 24.sp, color = Ink),
-    titleLarge = TextStyle(fontSize = 24.sp, lineHeight = 30.sp, fontWeight = FontWeight.Bold),
-    titleMedium = TextStyle(fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold),
-    labelLarge = TextStyle(fontSize = 14.sp, lineHeight = 18.sp),
+    bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 22.sp, color = Ink),
+    titleLarge = TextStyle(fontSize = 26.sp, lineHeight = 32.sp, fontWeight = FontWeight.Bold),
+    titleMedium = TextStyle(fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.Bold),
+    labelLarge = TextStyle(fontSize = 13.sp, lineHeight = 16.sp, fontWeight = FontWeight.Bold),
 )
 
 @Composable
@@ -44,8 +63,8 @@ fun SakloloTheme(content: @Composable () -> Unit) {
     MaterialTheme(colorScheme = Colors, typography = Type, content = content)
 }
 
-fun Urgency.stripe(): Color = when (this) {
-    Urgency.CRITICAL -> CriticalRed
-    Urgency.NEEDS_HELP -> HelpAmber
-    Urgency.SAFE -> SafeGreen
+fun Urgency.tint(): Color = when (this) {
+    Urgency.CRITICAL -> Accent
+    Urgency.NEEDS_HELP -> Amber
+    Urgency.SAFE -> SafeTint
 }

@@ -13,6 +13,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import ph.appbuilders.saklolo.ask.AskEngine
 import ph.appbuilders.saklolo.triage.SummaryChoice
 import ph.appbuilders.saklolo.triage.SummaryRefine
 
@@ -53,7 +54,7 @@ object GemmaSummarizer {
             var ok = false
             try {
                 ok = createEngine(appContext)
-            } catch (error: Exception) {
+            } catch (error: Throwable) {
                 Log.w(TAG, "model load failed", error)
             } finally {
                 policy.finishLoad(ok)
@@ -82,6 +83,28 @@ object GemmaSummarizer {
         return "Gemma file found at ${file.parentFile?.name ?: "files"}. It loads in the background at app start."
     }
 
+    /**
+     * Picks a stored Ask B-LINK pair id, or null for NONE / anything that is not
+     * a valid id. The model string is never returned to the screen.
+     * This does not wait for a load. The 15 second limit wraps the index call only.
+     */
+    fun chooseAskPair(context: Context, question: String, catalog: String, validIds: Set<Int>): Int? {
+        val llm = engine
+        return when (policy.plan(eligible(context), llm != null)) {
+            GemmaRefinePlan.SKIP -> null
+            GemmaRefinePlan.RULES_WITHOUT_WAITING -> {
+                preload(context)
+                null
+            }
+            GemmaRefinePlan.INFER -> {
+                val ready = llm ?: return null
+                infer(null) {
+                    AskEngine.parsePairChoice(askIndex(ready, question, catalog), validIds)
+                }
+            }
+        }
+    }
+
     fun refine(context: Context, transcript: String, rulesSummary: String): SummaryChoice {
         val rules = SummaryChoice(rulesSummary, SummaryRefine.RULES)
         val llm = engine
@@ -101,17 +124,26 @@ object GemmaSummarizer {
     }
 
     private fun <T> infer(fallback: T, block: () -> T): T {
+        if (!policy.tryBeginInference()) return fallback
         val timedOut = AtomicBoolean(false)
-        val future = executor.submit<T> {
-            try {
-                val value = block()
-                if (!timedOut.get()) policy.noteInferenceSuccess()
-                value
-            } catch (error: Exception) {
-                Log.w(TAG, "inference failed", error)
-                if (!timedOut.get()) policy.noteInferenceFailure()
-                fallback
+        val future = try {
+            executor.submit<T> {
+                try {
+                    val value = block()
+                    if (!timedOut.get()) policy.noteInferenceSuccess()
+                    value
+                } catch (error: Exception) {
+                    Log.w(TAG, "inference failed", error)
+                    if (!timedOut.get()) policy.noteInferenceFailure()
+                    fallback
+                } finally {
+                    policy.finishInference()
+                }
             }
+        } catch (error: Throwable) {
+            policy.finishInference()
+            Log.w(TAG, "inference submit failed", error)
+            return fallback
         }
         return try {
             future.get(GemmaAttemptPolicy.INFERENCE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -145,6 +177,29 @@ object GemmaSummarizer {
         val session = LlmInferenceSession.createFromOptions(llm, sessionOptions)
         return try {
             session.addQueryChunk(prompt(transcript))
+            session.generateResponse()
+        } finally {
+            session.close()
+        }
+    }
+
+    private fun askIndex(llm: LlmInference, question: String, catalog: String): String {
+        val sessionOptions = LlmInferenceSession.LlmInferenceSessionOptions.builder()
+            .setTopK(1)
+            .setTemperature(0f)
+            .build()
+        val session = LlmInferenceSession.createFromOptions(llm, sessionOptions)
+        return try {
+            session.addQueryChunk(
+                """
+                Match the question to one stored safety pair.
+                Reply with one token only: the pair id, or NONE.
+                Do not write an answer.
+                Question: ${question.take(400)}
+                Pairs:
+                $catalog
+                """.trimIndent(),
+            )
             session.generateResponse()
         } finally {
             session.close()

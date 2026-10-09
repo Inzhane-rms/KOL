@@ -6,6 +6,7 @@ import java.io.File
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import ph.appbuilders.saklolo.data.MIGRATION_1_2
 import ph.appbuilders.saklolo.data.RoomAlertPersistence
 import ph.appbuilders.saklolo.data.SakloloDatabase
 import ph.appbuilders.saklolo.model.Alert
@@ -39,6 +40,7 @@ class SakloloRuntime private constructor(val app: Application) {
         app.getExternalFilesDir(null)?.mkdirs()
         val database = Room.databaseBuilder(app, SakloloDatabase::class.java, "saklolo.db")
             .allowMainThreadQueries()
+            .addMigrations(MIGRATION_1_2)
             .fallbackToDestructiveMigration()
             .build()
         store = AlertStore(RoomAlertPersistence(database))
@@ -61,6 +63,10 @@ class SakloloRuntime private constructor(val app: Application) {
     fun ensureRelay() {
         relay.setFilter(settings.peerFilter())
         relay.start(settings.deviceName)
+    }
+
+    fun noteRelayStartFailed(message: String) {
+        relay.noteServiceStartFailed(message)
     }
 
     fun applyDemo(name: String, restrict: Boolean, allowlist: String) {

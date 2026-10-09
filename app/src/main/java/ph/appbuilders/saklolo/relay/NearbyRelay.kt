@@ -21,6 +21,7 @@ import ph.appbuilders.saklolo.model.AlertJson
 import ph.appbuilders.saklolo.model.AlertStore
 import ph.appbuilders.saklolo.model.ClipLink
 import java.io.File
+import java.util.concurrent.Executors
 
 /**
  * Phone-to-phone relay over Google Nearby Connections, strategy P2P_CLUSTER.
@@ -45,6 +46,11 @@ class NearbyRelay(
     private val incomingPayloads = HashMap<Long, Payload>()
     private val payloadToAlert = HashMap<Long, String>()
     private val completedFiles = HashMap<Long, File>()
+    private val io = Executors.newSingleThreadExecutor { runnable -> Thread(runnable, "saklolo-relay-io") }
+
+    init {
+        ClipRelay.deletePending(clipsDir)
+    }
 
     fun start(name: String) {
         when (endpoints.beginSession(name)) {
@@ -65,16 +71,22 @@ class NearbyRelay(
         endpoints.setFilter(filter)
     }
 
+    /** Foreground start failed before or during [start]. The next start is a fresh one. */
+    fun noteServiceStartFailed(message: String) {
+        endpoints.noteStartFailed()
+        publish(message)
+    }
+
     fun peers(): List<NearbyPeer> = endpoints.snapshot()
 
-    fun broadcast(alert: Alert): Int = send(listOf(alert), exceptEndpoint = null)
+    fun broadcast(alert: Alert): Int = send(listOf(alert), exceptEndpoint = null, forceClips = true)
 
     private fun beginAdvertising() {
         val advertising = AdvertisingOptions.Builder().setStrategy(Strategy.P2P_CLUSTER).build()
         client.startAdvertising(endpoints.localName(), SERVICE_ID, connectionCallback, advertising)
             .addOnFailureListener { error ->
                 Log.w(TAG, "advertise failed", error)
-                publish("Relay failed to advertise: ${error.message ?: "Play Services unavailable"}")
+                failStart("Relay failed to advertise: ${error.message ?: "Play Services unavailable"}")
             }
     }
 
@@ -83,14 +95,27 @@ class NearbyRelay(
         client.startDiscovery(SERVICE_ID, discoveryCallback, discovery)
             .addOnFailureListener { error ->
                 Log.w(TAG, "discovery failed", error)
-                publish("Relay failed to discover: ${error.message ?: "check Bluetooth and Wi-Fi"}")
+                failStart("Relay failed to discover: ${error.message ?: "check Bluetooth and Wi-Fi"}")
             }
     }
 
-    private fun send(alerts: List<Alert>, exceptEndpoint: String?): Int {
+    private fun failStart(message: String) {
+        endpoints.noteStartFailed()
+        runCatching { client.stopAdvertising() }
+        runCatching { client.stopDiscovery() }
+        publish(message)
+    }
+
+    private fun send(alerts: List<Alert>, exceptEndpoint: String?, forceClips: Boolean): Int {
+        val now = System.currentTimeMillis()
+        val prepared = alerts.map { alert ->
+            val keepClip = ClipRelay.includeClip(alert.createdAtMillis, now, forceClips) &&
+                !alert.audioPath.isNullOrBlank()
+            if (keepClip) alert else alert.copy(audioPath = null)
+        }
         val targets = endpoints.snapshot(exceptEndpoint)
         if (targets.isEmpty()) return 0
-        val wire = alerts.mapNotNull { RelayPolicy.outgoing(it) }
+        val wire = prepared.mapNotNull { RelayPolicy.outgoing(it) }
         if (wire.isEmpty()) return 0
         var delivered = 0
         for (peer in targets) {
@@ -171,8 +196,11 @@ class NearbyRelay(
             }
         }
         if (fresh.isNotEmpty() || attachedNow.isNotEmpty()) onAlertsChanged()
+        sweepPending()
         val pendingForward = fresh.filter { it.id !in attachedNow }
-        if (pendingForward.isNotEmpty()) send(pendingForward, exceptEndpoint = fromEndpoint)
+        if (pendingForward.isNotEmpty()) {
+            send(pendingForward, exceptEndpoint = fromEndpoint, forceClips = true)
+        }
         if (fresh.isNotEmpty()) {
             publish("Received ${fresh.size} alert${if (fresh.size == 1) "" else "s"}")
         }
@@ -181,9 +209,28 @@ class NearbyRelay(
     private fun handleFileSuccess(payloadId: Long, fromEndpoint: String) {
         val payload = synchronized(clipLock) { incomingPayloads.remove(payloadId) } ?: return
         if (payload.type != Payload.Type.FILE) return
-        val javaFile = payload.asFile()?.asJavaFile() ?: return
+        val shared = payload.asFile()
+        val uri = shared?.asUri()
+        if (uri == null) {
+            Log.w(TAG, "clip has no content uri for $payloadId")
+            return
+        }
         val temp = File(clipsDir, "pending-$payloadId.wav")
-        if (!copyClip(javaFile, temp)) return
+        val copied = try {
+            appContext.contentResolver.openInputStream(uri)?.use { input ->
+                ClipRelay.copyStream(input, temp)
+            } ?: false
+        } catch (error: Exception) {
+            Log.w(TAG, "clip copy failed for $payloadId", error)
+            temp.delete()
+            false
+        }
+        if (!copied) {
+            Log.w(TAG, "could not read clip $payloadId into app storage")
+            temp.delete()
+            return
+        }
+        deleteSharedOriginal(uri)
         val alertId = synchronized(clipLock) {
             val known = payloadToAlert[payloadId]
             if (known == null) {
@@ -193,23 +240,57 @@ class NearbyRelay(
                 known
             }
         }
-        if (alertId != null && storeClip(alertId, temp, fromEndpoint)) onAlertsChanged()
+        if (alertId != null) {
+            if (storeClip(alertId, temp, fromEndpoint)) onAlertsChanged()
+            else if (temp.exists()) {
+                synchronized(clipLock) { completedFiles[payloadId] = temp }
+            }
+        }
+        sweepPending()
+    }
+
+    /** Drops the Nearby download once the bytes are in app storage. A locked URI is left alone. */
+    private fun deleteSharedOriginal(uri: android.net.Uri) {
+        try {
+            appContext.contentResolver.delete(uri, null, null)
+        } catch (_: Exception) {
+        }
+    }
+
+    /** Incoming voice transfer finished, or the local recording stopped. */
+    fun onLocalRecordingFinished() {
+        io.execute { sweepPending() }
+    }
+
+    private fun sweepPending() {
+        val keep = synchronized(clipLock) { completedFiles.values.map { it.name }.toSet() }
+        ClipRelay.deletePending(clipsDir, keep)
     }
 
     private fun storeClip(alertId: String, source: File, fromEndpoint: String?): Boolean {
         if (!source.exists()) return false
-        if (source.length() !in 45..MAX_CLIP_BYTES) return false
+        if (source.length() !in 45..MAX_CLIP_BYTES) {
+            discardPending(source)
+            return false
+        }
         val current = store.find(alertId) ?: return false
         val existing = current.audioPath
         if (existing != null && File(existing).let { it.exists() && it.length() > WavPcm.HEADER_BYTES }) {
+            discardPending(source)
             return false
         }
         val dest = WavPcm.clipFile(clipsDir, alertId)
         if (!copyClip(source, dest)) return false
+        discardPending(source)
         store.attachAudio(alertId, dest.absolutePath)
         val updated = store.find(alertId) ?: return true
-        send(listOf(updated), exceptEndpoint = fromEndpoint)
+        send(listOf(updated), exceptEndpoint = fromEndpoint, forceClips = true)
         return true
+    }
+
+    private fun discardPending(source: File) {
+        if (!ClipRelay.isPendingWav(source)) return
+        if (!source.delete()) Log.w(TAG, "could not delete ${source.name}")
     }
 
     private fun copyClip(source: File, dest: File): Boolean {
@@ -226,15 +307,18 @@ class NearbyRelay(
     private val payloadCallback = object : PayloadCallback() {
         override fun onPayloadReceived(endpointId: String, payload: Payload) {
             when (payload.type) {
-                Payload.Type.BYTES -> handleBytes(endpointId, payload)
-                Payload.Type.FILE -> synchronized(clipLock) { incomingPayloads[payload.id] = payload }
+                Payload.Type.BYTES -> io.execute { handleBytes(endpointId, payload) }
+                Payload.Type.FILE -> io.execute {
+                    synchronized(clipLock) { incomingPayloads[payload.id] = payload }
+                }
                 else -> Unit
             }
         }
 
         override fun onPayloadTransferUpdate(endpointId: String, update: PayloadTransferUpdate) {
             if (update.status != PayloadTransferUpdate.Status.SUCCESS) return
-            handleFileSuccess(update.payloadId, endpointId)
+            val payloadId = update.payloadId
+            io.execute { handleFileSuccess(payloadId, endpointId) }
         }
     }
 
@@ -254,7 +338,7 @@ class NearbyRelay(
             if (result.status.isSuccess) {
                 endpoints.markConnected(endpointId, "Nearby phone", System.currentTimeMillis())
                 publish("Connected to a nearby phone")
-                send(store.snapshot(), exceptEndpoint = null)
+                send(store.snapshot(), exceptEndpoint = null, forceClips = false)
             } else {
                 endpoints.markConnectFailed(endpointId)
                 Log.w(TAG, "connection failed ${result.status}")
