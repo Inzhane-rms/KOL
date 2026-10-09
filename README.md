@@ -17,7 +17,7 @@ During a typhoon, a person may have no mobile signal. They hold the SOS button a
 
 The speech model is **bundled in the APK**. Gradle downloads `ggml-base-q5_1.bin` at build time into `app/src/main/assets/models/` (gitignored). On first launch the app copies that asset into private storage and checks its SHA-256. Transcription code never opens a socket.
 
-The Gemma file is **not** in the APK. Push it after install (see below). If it is missing, the phone is short on RAM, the model errors, or the call takes longer than 15 seconds, the keyword summary is what gets stored and relayed.
+The Gemma file is **not** in the APK. Push it after install (see below). If it is missing, the phone is short on RAM, two attempts fail, or a summary takes longer than 15 seconds, the keyword summary is what gets stored and relayed. That 15 second limit covers the summary call only. When the file is present and the phone reports at least 3.4 GiB of RAM, the model loads in the background at app start. One failed load or summary is retried on the next alert.
 
 Whisper language codes:
 
@@ -62,7 +62,7 @@ adb shell mkdir -p /sdcard/Android/data/ph.appbuilders.saklolo/files
 adb push gemma3-1b-it-int4.task /sdcard/Android/data/ph.appbuilders.saklolo/files/gemma3-1b-it-int4.task
 ```
 
-Restart the app after the push. On the next spoken alert, a phone that reports at least 3.4 GiB of total RAM (advertised 4 GB phones often report less than 4 GiB) may replace the keyword line with Gemma's line. The urgency chip stays on the keyword decision. The card shows **On-device AI** or **Keyword rules**.
+Restart the app after the push. If the phone reports at least 3.4 GiB of total RAM (advertised 4 GB phones often report less than 4 GiB), B-LINK loads Gemma in the background and the recorder shows **AI loading…** until it is ready. A spoken alert can then replace the keyword line with Gemma's line. The alert does not wait on that load. The urgency chip stays on the keyword decision. The card shows **On-device AI** or **Keyword rules**.
 
 Unit tests:
 
@@ -81,7 +81,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 `./gradlew testDebugUnitTest` and `./gradlew assembleRelease` are the checks for this tree. There was no handset and no Android emulator here, so the microphone, GPS, Nearby hop, foreground notification, Room restore after process death, Gemma load, and voice-clip playback were **not** run on a phone.
 
-Unit tests cover Tagalog, Bisaya, and English triage, direct receipt stored as **1 hop**, hop limit, dedupe, QR, JSON (audio path stays off the wire), Bisaya whisper code `tl`, the peer-name allowlist, the endpoint lock bookkeeping, the summary chooser, and the WAV header.
+Unit tests cover Tagalog, Bisaya, and English triage, direct receipt stored as **1 hop**, hop limit, dedupe, QR, JSON (audio path stays off the wire), Bisaya whisper code `tl`, the peer-name allowlist, the endpoint lock bookkeeping, the summary chooser, the Gemma load retry policy, and the WAV header.
 
 The offline speech path was checked earlier on this model file with whisper.cpp's `whisper-cli` (v1.9.5) on this Linux machine. See `docs/PLAN.md`. That check is not re-run on every build.
 

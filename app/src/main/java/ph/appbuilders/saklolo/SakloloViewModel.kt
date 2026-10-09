@@ -44,6 +44,7 @@ data class SosUiState(
     val error: String? = null,
     val sentAlertId: String? = null,
     val gemmaStatus: String = "",
+    val gemmaLoading: Boolean = false,
 )
 
 data class DemoConfig(
@@ -77,6 +78,11 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     val notice: StateFlow<String?> = _notice.asStateFlow()
 
     init {
+        viewModelScope.launch {
+            GemmaSummarizer.loading.collect { loading ->
+                _sos.update { it.copy(gemmaLoading = loading) }
+            }
+        }
         viewModelScope.launch {
             try {
                 val model = ModelInstaller.ensure(app) { progress ->
@@ -229,9 +235,10 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     private fun refineWithGemma(transcript: String, generation: Int) {
         val app = getApplication<Application>()
         if (!GemmaSummarizer.mightRun(app)) return
+        val willInfer = GemmaSummarizer.isReady()
         viewModelScope.launch {
             _sos.update { state ->
-                if (state.actionable) state.copy(status = "Summarizing on this phone…") else state
+                if (willInfer && state.actionable) state.copy(status = "Summarizing on this phone…") else state
             }
             val rules = _sos.value.summary
             if (rules.isBlank()) return@launch
