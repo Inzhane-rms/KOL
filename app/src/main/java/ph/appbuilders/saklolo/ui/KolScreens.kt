@@ -17,7 +17,11 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -28,6 +32,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Add
@@ -37,6 +42,9 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
@@ -106,6 +114,8 @@ import ph.appbuilders.saklolo.ui.theme.NavIdle
 import ph.appbuilders.saklolo.ui.theme.Page
 import ph.appbuilders.saklolo.ui.theme.Peach
 import ph.appbuilders.saklolo.ui.theme.PeachLight
+import ph.appbuilders.saklolo.ui.theme.PeachText
+import ph.appbuilders.saklolo.ui.theme.PillAmberText
 import ph.appbuilders.saklolo.ui.theme.Poppins
 import ph.appbuilders.saklolo.ui.theme.StatusGreen
 import ph.appbuilders.saklolo.ui.theme.Violet
@@ -203,7 +213,7 @@ fun KolHome(
         KolTop(name, onMenu, onBell, onAvatar, bellDot)
         Text("Hello $name!", color = Ink, fontFamily = Poppins, fontWeight = FontWeight.SemiBold, fontSize = 32.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
         Text(
-            "Offline · ${inRange.size} friends in range",
+            KolNav.friendsLine(inRange.size),
             color = InkSoft,
             fontFamily = Poppins,
             fontSize = 13.sp,
@@ -215,7 +225,7 @@ fun KolHome(
         KolStack(
             back = PeachLight,
             backLabel = KolNav.homeBackLabel(setupMissing, waiting, lastHeard, now),
-            frontHeight = 176.dp,
+            frontHeight = 208.dp,
             pill = "Call",
             pillIcon = Icons.Filled.Call,
             pillWidth = 140.dp,
@@ -229,7 +239,7 @@ fun KolHome(
                 color = Color.White.copy(alpha = 0.9f),
                 fontFamily = Poppins,
                 fontSize = 13.sp,
-                modifier = Modifier.padding(top = 12.dp),
+                modifier = Modifier.padding(top = 12.dp, end = 148.dp),
             )
         }
         Row(
@@ -239,15 +249,23 @@ fun KolHome(
         ) {
             Quick("Call", VioletLight, Violet, Icons.Filled.Call, onCallAny)
             Quick("Message", CyanLight, CyanText, Icons.Outlined.ChatBubbleOutline, onMessage)
-            Quick("Voice note", PeachLight, Peach, Icons.Filled.Mic) {
+            Quick("Voice note", PeachLight, PeachText, Icons.Filled.Mic) {
                 inRange.firstOrNull()?.let { onVoice(it.deviceId) }
             }
-            Quick("Add", Page, Ink, Icons.Filled.Add, onAdd)
+            Quick("Add", VioletLight, Violet, Icons.Filled.Add, onAdd)
         }
         Column(
             Modifier.padding(top = 12.dp).weight(1f).fillMaxWidth().clip(Panel).background(CardWhite).border(1.dp, Hairline, Panel),
         ) {
-            Text("Recent activity", color = Ink, fontFamily = Poppins, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp))
+            Row(
+                Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Recent activity", color = Ink, fontFamily = Poppins, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                Box(Modifier.height(56.dp).widthIn(min = 56.dp).clickable(onClick = onMessage), contentAlignment = Alignment.Center) {
+                    Text("View all", color = Violet, fontFamily = Poppins, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 8.dp))
+                }
+            }
             if (activity.isEmpty()) {
                 Text("Nothing yet. Add a friend to start.", color = InkSoft, fontFamily = Poppins, fontSize = 13.sp, modifier = Modifier.padding(16.dp))
             }
@@ -299,7 +317,7 @@ fun KolContacts(
         KolStack(
             back = CyanLight,
             backLabel = if (unsaved.isEmpty()) "Nobody new nearby" else unsaved.joinToString { it.name }.let { "$it nearby, not saved yet" },
-            frontHeight = 148.dp,
+            frontHeight = 176.dp,
             pill = "Call",
             pillIcon = Icons.Filled.Call,
             pillWidth = 140.dp,
@@ -307,11 +325,13 @@ fun KolContacts(
             modifier = Modifier.padding(top = 12.dp),
         ) {
             Text("In range now", color = Color.White, fontFamily = Poppins, fontWeight = FontWeight.SemiBold, fontSize = 24.sp)
-            inRange.take(2).forEach { row ->
-                Text(row.name, color = Color.White, fontFamily = Poppins, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
+            val shownRange = inRange.take(2)
+            shownRange.forEachIndexed { index, row ->
+                val end = if (index == shownRange.lastIndex) 148.dp else 0.dp
+                Text(row.name, color = Color.White, fontFamily = Poppins, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp, end = end))
             }
             if (inRange.isEmpty()) {
-                Text("Nobody in range", color = Color.White.copy(alpha = 0.85f), fontFamily = Poppins, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+                Text("Nobody in range", color = Color.White.copy(alpha = 0.85f), fontFamily = Poppins, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp, end = 148.dp))
             }
         }
         Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -430,7 +450,7 @@ fun KolChat(
 ) {
     val list = rememberKolListState()
     val clock = remember { SimpleDateFormat("h:mm a", Locale.US) }
-    Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 20.dp)) {
+    Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding().padding(horizontal = 20.dp)) {
         Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             RoundButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", CardWhite, Ink, onBack)
             PersonFace(row.name, 40, row.inRange, Modifier.padding(start = 8.dp))
@@ -477,8 +497,13 @@ fun KolChat(
                     }
                     if (own) {
                         Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Filled.Check, contentDescription = "Sent", tint = StatusGreen, modifier = Modifier.size(12.dp))
-                            Text("Sent · ${clock.format(Date(message.createdAtMillis))}", color = InkSoft, fontFamily = Poppins, fontSize = 11.sp, modifier = Modifier.padding(start = 4.dp))
+                            if (row.inRange) {
+                                Icon(Icons.Filled.Check, contentDescription = "Sent", tint = StatusGreen, modifier = Modifier.size(12.dp))
+                                Text("Sent · ${clock.format(Date(message.createdAtMillis))}", color = InkSoft, fontFamily = Poppins, fontSize = 11.sp, modifier = Modifier.padding(start = 4.dp))
+                            } else {
+                                Icon(Icons.Filled.Schedule, contentDescription = "Waiting", tint = Amber, modifier = Modifier.size(16.dp))
+                                Text("Waiting", color = PillAmberText, fontFamily = Poppins, fontWeight = FontWeight.SemiBold, fontSize = 11.sp, modifier = Modifier.padding(start = 4.dp))
+                            }
                         }
                     }
                 }
@@ -490,8 +515,8 @@ fun KolChat(
                 Modifier.padding(bottom = 8.dp).clip(CircleShape).background(AmberLight).padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Box(Modifier.size(8.dp).clip(CircleShape).background(Amber))
-                Text("Waiting · sends when in range", color = Ink, fontFamily = Poppins, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, modifier = Modifier.padding(start = 8.dp))
+                Icon(Icons.Filled.Schedule, contentDescription = null, tint = Amber, modifier = Modifier.size(16.dp))
+                Text("Waiting · sends when in range", color = PillAmberText, fontFamily = Poppins, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, modifier = Modifier.padding(start = 8.dp))
             }
         }
         KolChips(chips, onChip)
@@ -499,7 +524,6 @@ fun KolChat(
             Modifier.padding(bottom = 12.dp).fillMaxWidth().height(64.dp).clip(RoundedCornerShape(32.dp)).background(CardWhite).border(1.dp, Hairline, RoundedCornerShape(32.dp)).padding(horizontal = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            RoundButton(Icons.Filled.Add, "More", Page, Ink) {}
             BasicTextField(
                 value = draft,
                 onValueChange = onDraft,
@@ -531,6 +555,7 @@ fun KolCall(
     onDismiss: () -> Unit,
     onHoldStart: () -> Unit,
     onHoldEnd: () -> Unit,
+    onMute: (Boolean) -> Unit,
     onEnd: () -> Unit,
     onAccept: () -> Unit,
     onDecline: () -> Unit,
@@ -539,6 +564,7 @@ fun KolCall(
     onSendText: (String) -> Unit,
 ) {
     var muted by rememberSaveable(call.peerId) { mutableStateOf(false) }
+    LaunchedEffect(call.peerId, muted) { onMute(muted) }
     var gate by rememberSaveable(call.peerId) { mutableStateOf("") }
     var tick by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var started by rememberSaveable(call.peerId) { mutableLongStateOf(0L) }
@@ -555,7 +581,7 @@ fun KolCall(
         "INCOMING" -> "Incoming · offline"
         else -> "Calling… · offline"
     }
-    Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 20.dp)) {
+    Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(horizontal = 20.dp)) {
         Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             RoundButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", CardWhite, Ink, onBack)
             Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
@@ -600,7 +626,7 @@ fun KolCall(
         }
         if (call.emergency != null) {
             Column(
-                Modifier.padding(top = 12.dp).fillMaxWidth().height(144.dp).clip(Card).background(Accent).padding(16.dp),
+                Modifier.padding(top = 12.dp).fillMaxWidth().heightIn(min = 152.dp).clip(Card).background(Accent).padding(16.dp),
             ) {
                 Text("Possible emergency", color = Color.White, fontFamily = Poppins, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
                 Text("Heard ‘${CaptionDisplay.text(call.emergency)}’ · detected on-device", color = Color.White, fontFamily = Poppins, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
@@ -615,16 +641,16 @@ fun KolCall(
         }
         if (gate.isNotEmpty()) {
             Row(
-                Modifier.padding(bottom = 8.dp).fillMaxWidth().height(48.dp).clip(RoundedCornerShape(24.dp)).background(CardWhite).border(1.dp, Hairline, RoundedCornerShape(24.dp)).padding(start = 14.dp, end = 6.dp),
+                Modifier.padding(bottom = 8.dp).fillMaxWidth().height(56.dp).clip(RoundedCornerShape(28.dp)).background(CardWhite).border(1.dp, Hairline, RoundedCornerShape(28.dp)).padding(start = 14.dp, end = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 BasicTextField(value = gate, onValueChange = { gate = it }, modifier = Modifier.weight(1f), textStyle = TextStyle(color = Ink, fontFamily = Poppins, fontSize = 14.sp))
-                Box(Modifier.size(40.dp).clip(CircleShape).background(Violet).clickable {
+                Box(Modifier.size(56.dp).clip(CircleShape).background(Violet).clickable {
                     val text = gate.trim()
                     if (text.isNotEmpty()) onSendText(text)
                     gate = ""
                 }, contentAlignment = Alignment.Center) {
-                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send", tint = Color.White, modifier = Modifier.size(16.dp))
+                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send", tint = Color.White, modifier = Modifier.size(20.dp))
                 }
             }
         }
@@ -639,7 +665,7 @@ fun KolCall(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                RoundButton(Icons.Filled.Mic, if (muted) "Muted" else "Mute", if (muted) AmberLight else CardWhite, if (muted) Amber else Ink) { muted = !muted }
+                RoundButton(if (muted) Icons.Filled.MicOff else Icons.Filled.Mic, if (muted) "Muted" else "Mute", if (muted) AmberLight else CardWhite, if (muted) Amber else Ink) { muted = !muted }
                 Box(
                     Modifier
                         .weight(1f)
@@ -657,8 +683,12 @@ fun KolCall(
                         fontSize = 14.sp,
                     )
                 }
-                Box(Modifier.height(56.dp).clip(RoundedCornerShape(28.dp)).background(Ink).clickable(onClick = onEnd).padding(horizontal = 18.dp), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Filled.CallEnd, contentDescription = "End", tint = Color.White, modifier = Modifier.size(22.dp))
+                Row(
+                    Modifier.height(56.dp).clip(RoundedCornerShape(28.dp)).background(Ink).clickable(onClick = onEnd).padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Filled.CallEnd, contentDescription = null, tint = Color(0xFFFF8A8A), modifier = Modifier.size(22.dp))
+                    Text("End", color = Color.White, fontFamily = Poppins, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, modifier = Modifier.padding(start = 6.dp))
                 }
             }
         }
@@ -684,10 +714,11 @@ fun KolAdd(
     Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 20.dp)) {
         KolTop(name, onMenu, onBell, onAvatar, bellDot)
         Text("Add a friend", color = Ink, fontFamily = Poppins, fontWeight = FontWeight.SemiBold, fontSize = 32.sp, modifier = Modifier.padding(top = 12.dp))
+        Text("Share your code, or scan a friend's.", color = InkSoft, fontFamily = Poppins, fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp))
         KolStack(
             back = PeachLight,
             backLabel = "My code · $displayCode",
-            frontHeight = 324.dp,
+            frontHeight = 348.dp,
             pill = "Share my code",
             pillIcon = Icons.Filled.Share,
             pillWidth = 178.dp,
@@ -701,11 +732,11 @@ fun KolAdd(
                 if (qr != null) {
                     Image(qr, contentDescription = "My code", modifier = Modifier.size(188.dp), contentScale = ContentScale.Fit)
                 }
-                Box(Modifier.size(36.dp).clip(RoundedCornerShape(8.dp)).background(Color.White), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(Violet), contentAlignment = Alignment.Center) {
                     Image(painterResource(R.drawable.ic_launcher_foreground), contentDescription = "KOL", modifier = Modifier.size(32.dp))
                 }
             }
-            Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.padding(top = 12.dp, end = 186.dp), verticalAlignment = Alignment.CenterVertically) {
                 PersonFace(name, 36, true)
                 BasicTextField(
                     value = name,
@@ -715,11 +746,16 @@ fun KolAdd(
                 )
             }
         }
-        Box(
-            Modifier.padding(top = 12.dp).fillMaxWidth().height(72.dp).clip(RoundedCornerShape(28.dp)).background(Ink).clickable(onClick = onScan),
-            contentAlignment = Alignment.Center,
+        Row(
+            Modifier.padding(top = 12.dp).fillMaxWidth().height(72.dp).clip(RoundedCornerShape(28.dp)).background(Ink).clickable(onClick = onScan).padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("Scan QR", color = Color.White, fontFamily = Poppins, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+            Icon(Icons.Filled.QrCodeScanner, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
+            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                Text("Scan QR", color = Color.White, fontFamily = Poppins, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                Text("Add a friend from their code", color = Color.White.copy(alpha = 0.75f), fontFamily = Poppins, fontSize = 12.sp)
+            }
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
         }
         Column(
             Modifier.padding(top = 12.dp).weight(1f).fillMaxWidth().clip(Panel).background(CardWhite).border(1.dp, Hairline, Panel).padding(16.dp),
@@ -754,7 +790,9 @@ fun KolQuickCall(rows: List<ContactRow>, onCall: (ContactRow) -> Unit, onClose: 
     Column(Modifier.fillMaxWidth().clip(Panel).background(CardWhite).padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Call", color = Ink, fontFamily = Poppins, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, modifier = Modifier.weight(1f))
-            Text("Close", color = InkSoft, fontFamily = Poppins, fontSize = 13.sp, modifier = Modifier.clickable(onClick = onClose).padding(8.dp))
+            Box(Modifier.height(56.dp).widthIn(min = 56.dp).clickable(onClick = onClose), contentAlignment = Alignment.Center) {
+                Text("Close", color = InkSoft, fontFamily = Poppins, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 8.dp))
+            }
         }
         if (rows.isEmpty()) {
             Text("Nobody in range.", color = InkSoft, fontFamily = Poppins, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
@@ -783,7 +821,7 @@ private fun KolTop(name: String, onMenu: () -> Unit, onBell: () -> Unit, onAvata
             }
         }
         Spacer(Modifier.width(8.dp))
-        Box(Modifier.size(48.dp).clip(CircleShape).clickable(onClick = onAvatar)) {
+        Box(Modifier.size(56.dp).clickable(onClick = onAvatar), contentAlignment = Alignment.Center) {
             PersonFace(name, 48, true)
         }
     }
@@ -805,7 +843,7 @@ private fun KolStack(
         Box(Modifier.fillMaxWidth().height(80.dp).clip(Panel).background(back)) {
             Text(backLabel, color = Ink, fontFamily = Poppins, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 16.dp, top = 10.dp, end = 16.dp))
         }
-        Box(Modifier.padding(top = 44.dp).fillMaxWidth().height(frontHeight).clip(Panel).background(Violet).padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 72.dp)) {
+        Box(Modifier.padding(top = 44.dp).fillMaxWidth().height(frontHeight).clip(Panel).background(Violet).padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 16.dp)) {
             Column { front() }
         }
         Box(Modifier.align(Alignment.BottomEnd).padding(bottom = 8.dp).width(pillWidth).height(56.dp)) {
@@ -843,22 +881,37 @@ private fun Quick(label: String, fill: Color, tint: Color, icon: ImageVector, on
         Box(Modifier.size(56.dp).clip(CircleShape).background(fill), contentAlignment = Alignment.Center) {
             Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(22.dp))
         }
-        Text(label, color = Ink, fontFamily = Poppins, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+        Text(label, color = Ink, fontFamily = Poppins, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
     }
 }
 
 @Composable
 private fun ActivityLine(row: KolActivity, now: Long, onOpen: () -> Unit) {
+    val fill = when (row.tone) {
+        "voice" -> CyanLight
+        "sent" -> VioletLight
+        "waiting" -> AmberLight
+        else -> PeachLight
+    }
     val tint = when (row.tone) {
         "voice" -> Cyan
-        "sent" -> StatusGreen
-        else -> Violet
+        "sent" -> Violet
+        "waiting" -> Amber
+        else -> Peach
+    }
+    val icon = when (row.tone) {
+        "voice" -> Icons.Filled.Mic
+        "sent" -> Icons.Filled.Check
+        "waiting" -> Icons.Filled.Schedule
+        else -> Icons.Filled.Person
     }
     Row(
-        Modifier.fillMaxWidth().height(56.dp).clickable(onClick = onOpen).padding(horizontal = 16.dp),
+        Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(onClick = onOpen).padding(horizontal = 16.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(10.dp).clip(CircleShape).background(tint))
+        Box(Modifier.size(44.dp).clip(CircleShape).background(fill), contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+        }
         Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
             Text(row.title, color = Ink, fontFamily = Poppins, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1)
             Text(row.detail, color = InkSoft, fontFamily = Poppins, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -902,12 +955,22 @@ private fun ContactLine(
         Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(row.name, color = if (row.inRange) Ink else Ink.copy(alpha = 0.7f), fontFamily = Poppins, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Icon(
-                    Icons.Filled.Star,
-                    contentDescription = "Favorite",
-                    tint = if (row.favorite) Amber else Hairline,
-                    modifier = Modifier.padding(start = 4.dp).size(18.dp).clickable { onFavorite(row) },
-                )
+                Box(
+                    Modifier
+                        .padding(start = 4.dp)
+                        .size(18.dp)
+                        .wrapContentSize(unbounded = true)
+                        .size(56.dp)
+                        .clickable { onFavorite(row) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.Star,
+                        contentDescription = "Favorite",
+                        tint = if (row.favorite) Amber else Hairline,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
             }
             Text(
                 if (row.inRange) "In range" else formatWhen(row.lastHeardMillis, now),
@@ -917,8 +980,10 @@ private fun ContactLine(
                 maxLines = 1,
             )
         }
-        Box(Modifier.size(48.dp).clip(CircleShape).background(if (row.inRange) VioletLight else Page).clickable { onCall(row) }, contentAlignment = Alignment.Center) {
-            Icon(Icons.Filled.Call, contentDescription = "Call", tint = if (row.inRange) Violet else InkSoft, modifier = Modifier.size(18.dp))
+        Box(Modifier.size(56.dp).clickable { onCall(row) }, contentAlignment = Alignment.Center) {
+            Box(Modifier.size(48.dp).clip(CircleShape).background(if (row.inRange) VioletLight else Page), contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.Call, contentDescription = "Call", tint = if (row.inRange) Violet else InkSoft, modifier = Modifier.size(18.dp))
+            }
         }
     }
 }
@@ -986,8 +1051,10 @@ private fun PersonFace(name: String, size: Int, inRange: Boolean, modifier: Modi
 
 @Composable
 private fun RoundButton(icon: ImageVector, label: String, fill: Color, tint: Color, onClick: () -> Unit) {
-    Box(Modifier.size(48.dp).clip(CircleShape).background(fill).border(1.dp, Hairline, CircleShape).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
-        Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(20.dp))
+    Box(Modifier.size(56.dp).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(48.dp).clip(CircleShape).background(fill).border(1.dp, Hairline, CircleShape), contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(20.dp))
+        }
     }
 }
 

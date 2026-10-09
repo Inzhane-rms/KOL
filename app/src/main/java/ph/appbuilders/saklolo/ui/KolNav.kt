@@ -36,6 +36,9 @@ object KolNav {
         return "KOL-$suffix"
     }
 
+    fun friendsLine(inRange: Int): String =
+        if (inRange == 1) "Offline · 1 friend in range" else "Offline · $inRange friends in range"
+
     fun homeBackLabel(setupMissing: Int, waitingPeers: Int, lastHeardMillis: Long, now: Long): String = when {
         setupMissing > 0 -> "Setup needed"
         waitingPeers == 1 -> "1 queued"
@@ -61,21 +64,26 @@ object KolNav {
         messages.filter { it.kind == "voice" || it.kind == "call_clip" }
             .maxByOrNull { it.createdAtMillis }
             ?.let { message ->
+                val peerId = peerOf(message, myId)
+                val heard = if (message.fromDeviceId == peerId) message.senderName else ""
+                val name = peerName(peerId, contacts, heard)
                 rows += KolActivity(
-                    title = "Voice note",
+                    title = "Voice note · $name",
                     detail = CaptionDisplay.text(message.body).ifBlank { "Transcript on this phone" },
                     tone = "voice",
                     at = message.createdAtMillis,
-                    peerId = peerOf(message, myId),
+                    peerId = peerId,
                 )
             }
         messages.filter { (it.localOrigin || it.fromDeviceId == myId) && it.kind == "text" }
             .maxByOrNull { it.createdAtMillis }
             ?.let { message ->
+                val name = peerName(message.toDeviceId, contacts, "")
+                val delivered = contacts.firstOrNull { it.deviceId == message.toDeviceId }?.inRange == true
                 rows += KolActivity(
-                    title = "Message delivered",
+                    title = if (delivered) "Message delivered · $name" else "Waiting · $name",
                     detail = CaptionDisplay.text(message.body),
-                    tone = "sent",
+                    tone = if (delivered) "sent" else "waiting",
                     at = message.createdAtMillis,
                     peerId = message.toDeviceId,
                 )
@@ -84,7 +92,7 @@ object KolNav {
             .maxByOrNull { it.addedAtMillis }
             ?.let { contact ->
                 rows += KolActivity(
-                    title = "Contact added",
+                    title = "Contact added · ${contact.name}",
                     detail = contact.name,
                     tone = "added",
                     at = contact.addedAtMillis,
@@ -96,6 +104,13 @@ object KolNav {
 
     private fun peerOf(message: DirectMessage, myId: String): String =
         if (message.localOrigin || message.fromDeviceId == myId) message.toDeviceId else message.fromDeviceId
+
+    private fun peerName(deviceId: String, contacts: List<ContactRow>, senderName: String): String {
+        val saved = contacts.firstOrNull { it.deviceId == deviceId }?.name?.trim().orEmpty()
+        if (saved.isNotEmpty()) return saved
+        val heard = senderName.trim()
+        return heard.ifBlank { "Friend" }
+    }
 }
 
 data class KolActivity(

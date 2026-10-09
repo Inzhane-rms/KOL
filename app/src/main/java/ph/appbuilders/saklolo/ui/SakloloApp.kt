@@ -370,6 +370,7 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                             }
                         },
                         onHoldEnd = viewModel::stopHold,
+                        onMute = viewModel::setHoldMuted,
                         onEnd = {
                             viewModel.endCall()
                             route = backTab

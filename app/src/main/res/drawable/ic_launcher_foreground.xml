@@ -6,8 +6,8 @@
     android:viewportHeight="108">
     <!-- Mark centered, scaled to sit inside the 66dp safe zone. -->
     <group
-        android:scaleX="0.39"
-        android:scaleY="0.39"
+        android:scaleX="0.44"
+        android:scaleY="0.44"
         android:translateX="54"
         android:translateY="54">
         <path

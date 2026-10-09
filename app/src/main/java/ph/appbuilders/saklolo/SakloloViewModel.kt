@@ -26,6 +26,7 @@ import ph.appbuilders.saklolo.contact.CallPhase
 import ph.appbuilders.saklolo.contact.CallState
 import ph.appbuilders.saklolo.contact.ClipPlay
 import ph.appbuilders.saklolo.contact.Hangup
+import ph.appbuilders.saklolo.contact.HoldMute
 import ph.appbuilders.saklolo.contact.NameChoice
 import ph.appbuilders.saklolo.contact.ContactQr
 import ph.appbuilders.saklolo.contact.ContactRow
@@ -1053,6 +1054,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
             _notice.value = "Not in range right now"
             return
         }
+        holdMuted = false
         syncClock()
         ring.inviteOut(peerId, row.name)
         applyRing()
@@ -1064,6 +1066,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
 
     fun acceptCall() {
         if (call.peerId.isBlank()) return
+        holdMuted = false
         syncClock()
         ring.accept(runtime.directMessages.value, deviceId())
         applyRing()
@@ -1088,6 +1091,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         applyRing()
         flushRingSends()
         if (holdingNow) stopHold()
+        holdMuted = false
         releaseCallAudio()
         publishCall(emergency = null)
     }
@@ -1113,7 +1117,13 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
         if (call.peerId == peerId) dismissEmergency()
     }
 
+    fun setHoldMuted(muted: Boolean) {
+        holdMuted = muted
+        if (HoldMute.dropInFlight(muted)) discardHold()
+    }
+
     fun startHold() {
+        if (!HoldMute.allowStart(holdMuted)) return
         if (!CallMachine.canHold(call)) return
         if (_sos.value.recording || _voice.value.recording || recorder.isRunning) return
         if (!_sos.value.modelReady) {
@@ -1145,6 +1155,10 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun stopHold() {
+        if (holdMuted) {
+            discardHold()
+            return
+        }
         if (!holding && !recorder.isRunning) return
         val session = holdSession
         val peer = call.peerId
@@ -1168,12 +1182,13 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
                     engine.transcribe(pcm, _sos.value.language.whisperCode)
                 }
             }
-            if (session != holdSession) return@launch
+            if (session != holdSession || holdMuted) return@launch
             transcribingHold = false
             val body = text.trim()
             if (body.isNotEmpty() && peer.isNotBlank()) {
                 val id = java.util.UUID.randomUUID().toString()
                 val audioPath = withContext(Dispatchers.IO) { ClipStore.write(runtime.clipsDir, id, pcm) }
+                if (session != holdSession || holdMuted) return@launch
                 val message = DirectMessage(
                     id = id,
                     fromDeviceId = deviceId(),
@@ -1192,6 +1207,24 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
                 if (Ptt.emergency(body)) publishCall(emergency = body)
             }
             publishCall()
+        }
+    }
+
+    /** Stops the mic and throws away the clip. Mute must not transcribe or send. */
+    private fun discardHold() {
+        holdSession += 1
+        val wasLive = holding || recorder.isRunning
+        holding = false
+        holdElapsed = 0
+        transcribingHold = false
+        if (wasLive) publishCall()
+        if (!recorder.isRunning) return
+        viewModelScope.launch {
+            recordGate.withLock {
+                if (!recorder.isRunning) return@withLock
+                runtime.relay.onLocalRecordingFinished()
+                recorder.stop()
+            }
         }
     }
 
@@ -1234,6 +1267,7 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
 
     private val dismissedEmergency = HashSet<String>()
     private var holding = false
+    private var holdMuted = false
     private var transcribingHold = false
     private var holdElapsed = 0
     private var holdSession = 0

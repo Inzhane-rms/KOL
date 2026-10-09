@@ -6,6 +6,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import ph.appbuilders.saklolo.contact.ContactRow
 import ph.appbuilders.saklolo.contact.DirectMessage
+import ph.appbuilders.saklolo.contact.HoldMute
 import ph.appbuilders.saklolo.ui.KolNav
 import ph.appbuilders.saklolo.ui.MainNav
 
@@ -53,10 +54,23 @@ class KolUiTest {
             message("t1", me, "phone-ben1", "Sige", "text", 3_000, local = true),
         )
         val activity = KolNav.recentActivity(messages, listOf(ben), me)
-        assertEquals(listOf("Contact added", "Message delivered", "Voice note"), activity.map { it.title })
+        assertEquals(
+            listOf("Contact added · Ben", "Waiting · Ben", "Voice note · Ben"),
+            activity.map { it.title },
+        )
+        assertEquals("waiting", activity.first { it.peerId == "phone-ben1" && it.at == 3_000L }.tone)
+        assertTrue(activity.none { it.title.contains("delivered", ignoreCase = true) })
         assertTrue(activity.none { it.title.contains("missed", ignoreCase = true) })
+        val delivered = KolNav.recentActivity(messages, listOf(ben.copy(inRange = true)), me)
+        assertEquals("Message delivered · Ben", delivered.first { it.at == 3_000L }.title)
+        assertEquals("Offline · 1 friend in range", KolNav.friendsLine(1))
+        assertEquals("Offline · 2 friends in range", KolNav.friendsLine(2))
         assertEquals(1, KolNav.waitingPeers(messages, listOf(ben), me))
         assertEquals(0, KolNav.waitingPeers(messages, listOf(ben.copy(inRange = true)), me))
+        assertFalse(HoldMute.allowStart(muted = true))
+        assertTrue(HoldMute.allowStart(muted = false))
+        assertTrue(HoldMute.dropInFlight(muted = true))
+        assertFalse(HoldMute.dropInFlight(muted = false))
     }
 
     private fun contact(id: String, name: String, saved: Boolean, inRange: Boolean, added: Long) = ContactRow(
