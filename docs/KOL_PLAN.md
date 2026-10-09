@@ -1,4 +1,6 @@
-# B-LINK build plan
+# KOL build plan
+
+Historical. This is the earlier build plan. It is not a description of the v0.12.7 app. See the README for what that release does.
 
 Hackathon deadline: 10:00 AM Manila, 10 October 2026. This pass favors a demo that builds and works offline over extra screens.
 
