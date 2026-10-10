@@ -56,11 +56,8 @@ static void saklolo_fill(
     params->logprob_thold = -1.0f;
     params->language = "tl";
     params->detect_language = false;
-    if (beam > 1) {
-        params->beam_search.beam_size = beam;
-    } else {
-        params->greedy.best_of = 3;
-    }
+    (void) beam;
+    params->greedy.best_of = 3;
     params->initial_prompt = (hint != NULL && hint[0] != '\0') ? hint : NULL;
     params->carry_initial_prompt = params->initial_prompt != NULL;
     params->abort_callback = saklolo_should_abort;
@@ -195,10 +192,8 @@ Java_ph_appbuilders_saklolo_stt_WhisperNative_transcribe(
     saklolo_abort clock;
     clock.deadline_us = budget_ms > 0 ? saklolo_now_us() + budget_ms * 1000LL : 0;
 
-    /* Greedy best_of 3 is the default. Beam is opt-in from Kotlin.
-       A deadline of about 1.5x the clip, at least 3s, aborts the decode. */
-    struct whisper_full_params params = whisper_full_default_params(
-            beam > 1 ? WHISPER_SAMPLING_BEAM_SEARCH : WHISPER_SAMPLING_GREEDY);
+    /* Greedy best_of 3 only. The deadline is four times the clip, at least 15s. */
+    struct whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
     params.n_threads = n_threads;
     saklolo_fill(&params, beam, hint, &clock);
 
@@ -206,37 +201,6 @@ Java_ph_appbuilders_saklolo_stt_WhisperNative_transcribe(
     int rc = whisper_full(ctx, params, samples, n_samples);
     bool aborted = rc == -6 || rc == -8 || g_cancel;
     char * text = (rc == 0 || aborted) ? saklolo_collect(ctx) : NULL;
-
-    if (aborted && beam > 1 && !g_cancel) {
-        const int64_t remain = clock.deadline_us - saklolo_now_us();
-        if (remain >= 3000000LL) {
-            clock.deadline_us = saklolo_now_us() + remain;
-            struct whisper_full_params greedy = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
-            greedy.n_threads = n_threads;
-            saklolo_fill(&greedy, 1, hint, &clock);
-            const int retry = whisper_full(ctx, greedy, samples, n_samples);
-            const bool retry_abort = retry == -6 || retry == -8 || g_cancel;
-            char * second = (retry == 0 || retry_abort) ? saklolo_collect(ctx) : NULL;
-            const int first_len = text == NULL ? 0 : (int) strlen(text);
-            const int second_len = second == NULL ? 0 : (int) strlen(second);
-            if (retry == 0 && second_len > 0) {
-                aborted = false;
-                free(text);
-                text = second;
-                rc = 0;
-            } else if (retry == 0 && first_len == 0) {
-                aborted = false;
-                free(text);
-                text = second;
-                rc = 0;
-            } else if (second_len > first_len) {
-                free(text);
-                text = second;
-            } else {
-                free(second);
-            }
-        }
-    }
 
     (*env)->ReleaseFloatArrayElements(env, audio, samples, JNI_ABORT);
     if (hint != NULL) {

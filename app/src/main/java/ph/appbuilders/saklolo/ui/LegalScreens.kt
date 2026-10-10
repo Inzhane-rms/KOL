@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -66,6 +68,7 @@ fun LegalGate(onOpen: (String) -> Unit, onContinue: () -> Unit) {
             .background(Page)
             .statusBarsPadding()
             .navigationBarsPadding()
+            .imePadding()
             .padding(horizontal = 24.dp),
     ) {
         Text(
@@ -101,7 +104,7 @@ fun LegalGate(onOpen: (String) -> Unit, onContinue: () -> Unit) {
             Modifier
                 .padding(top = 12.dp, bottom = 24.dp)
                 .fillMaxWidth()
-                .height(56.dp)
+                .heightIn(min = 56.dp)
                 .clip(RoundedCornerShape(28.dp))
                 .background(Violet)
                 .clickable(onClick = onContinue),
@@ -143,7 +146,7 @@ private fun LinkText(label: String, onClick: () -> Unit) {
         fontSize = 15.sp,
         textDecoration = TextDecoration.Underline,
         modifier = Modifier
-            .height(56.dp)
+            .heightIn(min = 56.dp)
             .clickable(onClick = onClick)
             .padding(vertical = 16.dp),
     )
@@ -157,6 +160,7 @@ fun LegalHub(onOpen: (String) -> Unit, onSettings: () -> Unit, onClose: () -> Un
             .background(Page)
             .statusBarsPadding()
             .navigationBarsPadding()
+            .imePadding()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 24.dp),
     ) {
@@ -199,7 +203,7 @@ fun LegalHub(onOpen: (String) -> Unit, onSettings: () -> Unit, onClose: () -> Un
             Modifier
                 .padding(top = 16.dp, bottom = 28.dp)
                 .fillMaxWidth()
-                .height(56.dp)
+                .heightIn(min = 56.dp)
                 .clip(RoundedCornerShape(28.dp))
                 .background(CardWhite)
                 .border(1.dp, Hairline, RoundedCornerShape(28.dp))
@@ -223,7 +227,7 @@ private fun HubRow(label: String, onClick: () -> Unit) {
         Modifier
             .padding(top = 8.dp)
             .fillMaxWidth()
-            .height(56.dp)
+            .heightIn(min = 56.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(CardWhite)
             .border(1.dp, Hairline, RoundedCornerShape(16.dp))
@@ -253,6 +257,7 @@ fun LegalPage(name: String, onClose: () -> Unit) {
             .background(Page)
             .statusBarsPadding()
             .navigationBarsPadding()
+            .imePadding()
             .padding(horizontal = 24.dp),
     ) {
         Text(
@@ -279,7 +284,7 @@ fun LegalPage(name: String, onClose: () -> Unit) {
             Modifier
                 .padding(top = 12.dp, bottom = 24.dp)
                 .fillMaxWidth()
-                .height(56.dp)
+                .heightIn(min = 56.dp)
                 .clip(RoundedCornerShape(28.dp))
                 .background(Violet)
                 .clickable(onClick = onClose),

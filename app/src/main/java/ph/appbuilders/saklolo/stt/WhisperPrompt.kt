@@ -6,11 +6,10 @@ package ph.appbuilders.saklolo.stt
  * Language is Tagalog. Temperature starts at 0 and steps by 0.2. Entropy is
  * 2.4 and logprob is -1.0. no_context is on.
  *
- * Greedy best_of [BEST_OF] is the default. Each clip aborts at about 1.5 times
- * its length, and at least 3 seconds. Beam size [BEAM] runs only after a previous
- * greedy clip finished faster than the clip itself. A slow or aborted beam turns
- * that opt-in off. whisper.cpp keeps walking the temperature step while it is
- * below 1.0, and it stops early when entropy and logprob are inside the thresholds.
+ * Greedy best_of [BEST_OF] is the only decode. Each clip aborts at four times
+ * its length, and at least 15 seconds. Beam size [BEAM] is not requested.
+ * whisper.cpp keeps walking the temperature step while it is below 1.0, and it
+ * stops early when entropy and logprob are inside the thresholds.
  */
 object WhisperPrompt {
     const val LANGUAGE = "tl"

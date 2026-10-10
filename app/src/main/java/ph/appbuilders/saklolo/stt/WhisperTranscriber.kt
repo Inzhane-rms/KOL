@@ -181,7 +181,7 @@ class WhisperTranscriber internal constructor(
         }
         val clipSeconds = audio.size / SpeechPrep.SAMPLE_RATE.toDouble()
         val budgetMs = DecodeBudget.deadlineMs(clipSeconds)
-        val beam = BeamSelect.nextBeam(WhisperPrompt.BEAM, beamEarned)
+        val beam = 1
         val started = System.nanoTime()
         val raw = engine.transcribe(
             contextPtr,

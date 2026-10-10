@@ -21,7 +21,6 @@ import ph.appbuilders.saklolo.relay.runRelayServiceStart
 import ph.appbuilders.saklolo.stt.SpeechLanguage
 import ph.appbuilders.saklolo.triage.SummaryRefine
 import ph.appbuilders.saklolo.ui.SosHoldEnd
-import ph.appbuilders.saklolo.ui.questionToAutoSend
 import ph.appbuilders.saklolo.ui.sosHoldEnd
 import ph.appbuilders.saklolo.ui.undoExpired
 
@@ -283,14 +282,6 @@ class ReviewFixesTest {
             elapsedMs = elapsedMs,
             cancelled = cancelled,
         )
-
-    @Test
-    fun topicSeedIsSentRatherThanLeftInTheDraft() {
-        assertEquals("nagdudugo", questionToAutoSend("  nagdudugo  "))
-        assertEquals("Baha sa bahay, ano ang gagawin?", questionToAutoSend("Baha sa bahay, ano ang gagawin?"))
-        assertNull(questionToAutoSend("   "))
-        assertNull(questionToAutoSend(null))
-    }
 
     private fun foregroundStartNotAllowed(message: String): Exception {
         val type = Class.forName("android.app.ForegroundServiceStartNotAllowedException")

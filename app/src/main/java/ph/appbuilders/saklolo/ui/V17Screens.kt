@@ -17,7 +17,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -889,7 +892,7 @@ private fun Modifier.pointerHold(enabled: Boolean, onStart: () -> Unit, onEnd: (
 fun NamePrompt(initial: String, onContinue: (String) -> Unit) {
     var draft by remember { mutableStateOf(initial) }
     Column(
-        Modifier.fillMaxSize().background(Page).statusBarsPadding().navigationBarsPadding().padding(horizontal = 24.dp),
+        Modifier.fillMaxSize().background(Page).statusBarsPadding().navigationBarsPadding().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Spacer(Modifier.height(48.dp))
@@ -907,16 +910,16 @@ fun NamePrompt(initial: String, onContinue: (String) -> Unit) {
             value = draft,
             onValueChange = { draft = it.take(40) },
             textStyle = androidx.compose.ui.text.TextStyle(color = Ink, fontFamily = Poppins, fontSize = 18.sp),
-            modifier = Modifier.padding(top = 28.dp).fillMaxWidth().height(56.dp).clip(RoundedCornerShape(28.dp)).background(CardWhite).border(1.dp, Hairline, RoundedCornerShape(28.dp)).padding(horizontal = 18.dp),
+            modifier = Modifier.padding(top = 28.dp).fillMaxWidth().heightIn(min = 56.dp).clip(RoundedCornerShape(28.dp)).background(CardWhite).border(1.dp, Hairline, RoundedCornerShape(28.dp)).padding(horizontal = 18.dp, vertical = 8.dp),
             decorationBox = { inner ->
-                Box(Modifier.fillMaxWidth().height(56.dp), contentAlignment = Alignment.CenterStart) {
+                Box(Modifier.fillMaxWidth().heightIn(min = 48.dp), contentAlignment = Alignment.CenterStart) {
                     if (draft.isEmpty()) Text(NameChoice.PROMPT, color = InkSoft, fontFamily = Poppins, fontSize = 16.sp)
                     inner()
                 }
             },
         )
         Box(
-            Modifier.padding(top = 16.dp).fillMaxWidth().height(56.dp).clip(RoundedCornerShape(28.dp)).background(Violet).clickable { onContinue(draft) },
+            Modifier.padding(top = 16.dp, bottom = 24.dp).fillMaxWidth().heightIn(min = 56.dp).clip(RoundedCornerShape(28.dp)).background(Violet).clickable { onContinue(draft) },
             contentAlignment = Alignment.Center,
         ) {
             Text("Continue", color = Color.White, fontFamily = Poppins, fontWeight = FontWeight.Bold, fontSize = 16.sp)

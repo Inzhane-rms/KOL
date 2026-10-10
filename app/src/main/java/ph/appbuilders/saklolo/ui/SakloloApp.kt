@@ -30,6 +30,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -520,7 +521,7 @@ fun SakloloApp(viewModel: SakloloViewModel) {
             }
         }
         if (quickCall && route != CALL) {
-            Box(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(start = 20.dp, end = 20.dp, bottom = 88.dp)) {
+            Box(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().imePadding().padding(start = 20.dp, end = 20.dp, bottom = 88.dp)) {
                 KolQuickCall(
                     rows = contacts.filter { it.inRange },
                     onCall = { place(it.deviceId) },
@@ -536,7 +537,7 @@ fun SakloloApp(viewModel: SakloloViewModel) {
                 onContacts = { route = CONTACTS },
                 onMessages = { route = MESSAGES },
                 onAdd = { route = ADD },
-                modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 8.dp),
+                modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().imePadding().padding(bottom = 8.dp),
             )
         }
     }

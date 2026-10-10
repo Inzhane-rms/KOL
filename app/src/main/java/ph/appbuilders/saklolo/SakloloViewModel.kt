@@ -45,9 +45,6 @@ import ph.appbuilders.saklolo.contact.DeleteTap
 import ph.appbuilders.saklolo.contact.WipeLaunch
 import ph.appbuilders.saklolo.contact.WipeSessions
 import ph.appbuilders.saklolo.contact.WipeUi
-import ph.appbuilders.saklolo.ask.AskEngine
-import ph.appbuilders.saklolo.ask.AskResult
-import ph.appbuilders.saklolo.ask.AskTurn
 import ph.appbuilders.saklolo.audio.ClipStore
 import ph.appbuilders.saklolo.audio.Waveform
 import ph.appbuilders.saklolo.audio.WavPcm
@@ -72,7 +69,6 @@ import ph.appbuilders.saklolo.stt.TranscriptLimit
 import ph.appbuilders.saklolo.stt.SpeechLanguage
 import ph.appbuilders.saklolo.stt.WhisperTranscriber
 import ph.appbuilders.saklolo.summary.GemmaSummarizer
-import ph.appbuilders.saklolo.ask.SafetyBank
 import ph.appbuilders.saklolo.triage.SummaryRefine
 import ph.appbuilders.saklolo.triage.TriageEngine
 import ph.appbuilders.saklolo.triage.Urgency
@@ -184,11 +180,6 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     private val _chatRead = MutableStateFlow(runtime.settings.lastChatReadMillis)
     val chatReadMillis: StateFlow<Long> = _chatRead.asStateFlow()
 
-    private val _askTurns = MutableStateFlow<List<AskTurn>>(emptyList())
-    val askTurns: StateFlow<List<AskTurn>> = _askTurns.asStateFlow()
-    private var nextAskId = 1L
-    private var askBank: SafetyBank? = null
-
     private val _sos = MutableStateFlow(SosUiState(language = runtime.settings.language))
     val sos: StateFlow<SosUiState> = _sos.asStateFlow()
 
@@ -255,42 +246,6 @@ class SakloloViewModel(app: Application) : AndroidViewModel(app) {
     fun setLanguage(language: SpeechLanguage) {
         runtime.settings.language = language
         _sos.update { it.copy(language = language) }
-    }
-
-    fun submitAsk(text: String) {
-        val trimmed = text.trim()
-        if (trimmed.isEmpty()) return
-        val bank = safetyBank()
-        val rules = AskEngine.answer(trimmed, bank)
-        val id = nextAskId
-        nextAskId += 1
-        _askTurns.update { it + AskTurn(id, trimmed, rules) }
-        val app = getApplication<Application>()
-        if (rules !is AskResult.Fallback || !GemmaSummarizer.mightRun(app)) return
-        val catalog = bank.pairs.joinToString("\n") { pair ->
-            "${pair.id}. ${pair.questionTl} / ${pair.questionEn}"
-        }
-        val valid = bank.pairs.map { it.id }.toSet()
-        viewModelScope.launch {
-            val chosen = withContext(Dispatchers.IO) {
-                GemmaSummarizer.chooseAskPair(app, trimmed, catalog, valid)
-            } ?: return@launch
-            val pair = bank.pairs.firstOrNull { it.id == chosen } ?: return@launch
-            val tip = AskEngine.tipFor(pair).copy(fromModel = true)
-            _askTurns.update { turns ->
-                turns.map { turn ->
-                    if (turn.id == id && turn.result is AskResult.Fallback) turn.copy(result = tip) else turn
-                }
-            }
-        }
-    }
-
-    private fun safetyBank(): SafetyBank {
-        askBank?.let { return it }
-        val json = getApplication<Application>().assets.open("ask/ask_blink_qa.json")
-            .bufferedReader()
-            .use { it.readText() }
-        return AskEngine.parse(json).also { askBank = it }
     }
 
     fun onTranscriptChange(text: String, raw: String? = null) {

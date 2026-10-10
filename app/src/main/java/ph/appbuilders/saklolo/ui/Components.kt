@@ -27,7 +27,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PlayArrow
@@ -343,7 +342,6 @@ fun BottomSwitcher(
     route: String,
     alertBadge: Int,
     onRecord: () -> Unit,
-    onAsk: () -> Unit,
     onFeed: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -367,7 +365,6 @@ fun BottomSwitcher(
         ) {
             NavSide("Medic", Icons.Filled.Notifications, route == "feed", alertBadge, Modifier.weight(1f), onFeed)
             Box(Modifier.size(width = 88.dp, height = 64.dp))
-            NavSide("Ask", Icons.Filled.ChatBubble, route == "ask", 0, Modifier.weight(1f), onAsk)
         }
         Column(
             Modifier.align(Alignment.TopCenter),

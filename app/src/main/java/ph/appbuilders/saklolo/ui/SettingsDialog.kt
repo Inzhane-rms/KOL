@@ -8,8 +8,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Switch
@@ -62,6 +65,8 @@ fun SettingsDialog(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .imePadding()
+                .verticalScroll(rememberScrollState())
                 .clip(RoundedCornerShape(24.dp))
                 .background(Color.White)
                 .padding(16.dp),
@@ -84,7 +89,8 @@ fun SettingsDialog(
                             .background(if (selected) SafeGreen else Color.White)
                             .border(1.dp, SafeGreen, RoundedCornerShape(20.dp))
                             .clickable { language = option }
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                            .heightIn(min = 48.dp)
+                            .padding(horizontal = 12.dp, vertical = 12.dp),
                     )
                 }
             }
@@ -104,16 +110,16 @@ fun SettingsDialog(
                 fontSize = 14.sp,
             )
             Text(initial.gemmaStatus, color = InkSoft, fontSize = 14.sp)
-            TextButton(onClick = { confirmDelete = true }, enabled = !deleting, modifier = Modifier.height(56.dp)) {
+            TextButton(onClick = { confirmDelete = true }, enabled = !deleting, modifier = Modifier.heightIn(min = 56.dp)) {
                 Text(stringResource(R.string.legal_delete), color = Accent, fontFamily = Poppins, fontSize = 16.sp, fontWeight = FontWeight.Bold)
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = onDismiss, modifier = Modifier.height(56.dp)) {
+                TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 56.dp)) {
                     Text("Cancel", color = InkSoft, fontSize = 16.sp)
                 }
                 TextButton(
                     onClick = { onSave(name, restrict, allowlist, language) },
-                    modifier = Modifier.height(56.dp),
+                    modifier = Modifier.heightIn(min = 56.dp),
                 ) {
                     Text("Save", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 }
@@ -125,6 +131,8 @@ fun SettingsDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .imePadding()
+                    .verticalScroll(rememberScrollState())
                     .clip(RoundedCornerShape(28.dp))
                     .background(Page)
                     .padding(16.dp),
@@ -157,7 +165,7 @@ fun SettingsDialog(
                     Box(
                         Modifier
                             .weight(1f)
-                            .height(56.dp)
+                            .heightIn(min = 56.dp)
                             .clip(RoundedCornerShape(28.dp))
                             .background(CardWhite)
                             .border(1.dp, Hairline, RoundedCornerShape(28.dp))
@@ -169,7 +177,7 @@ fun SettingsDialog(
                     Box(
                         Modifier
                             .weight(1f)
-                            .height(56.dp)
+                            .heightIn(min = 56.dp)
                             .clip(RoundedCornerShape(28.dp))
                             .background(Accent)
                             .alpha(if (deleting) 0.4f else 1f)
@@ -201,6 +209,7 @@ private fun DemoField(value: String, onChange: (String) -> Unit) {
         cursorBrush = SolidColor(Ink),
         modifier = Modifier
             .fillMaxWidth()
+            .heightIn(min = 48.dp)
             .background(Page, RoundedCornerShape(12.dp))
             .padding(12.dp),
     )

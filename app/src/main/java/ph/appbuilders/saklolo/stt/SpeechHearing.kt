@@ -34,13 +34,14 @@ data class SpeechHearing(
     }
 }
 
-/** Greedy is the default. Beam is allowed only after a clip finished faster than its own length. */
+/** Greedy only. Each clip gets at least 15 seconds, or four times its length. */
 object DecodeBudget {
     const val SLOW_FACTOR = 1.5
-    const val MIN_DEADLINE_MS = 3_000L
+    const val CLIP_FACTOR = 4.0
+    const val MIN_DEADLINE_MS = 15_000L
 
     fun deadlineMs(clipSeconds: Double): Long {
-        val scaled = (clipSeconds * SLOW_FACTOR * 1000.0).toLong()
+        val scaled = (clipSeconds * CLIP_FACTOR * 1000.0).toLong()
         return maxOf(MIN_DEADLINE_MS, scaled)
     }
 

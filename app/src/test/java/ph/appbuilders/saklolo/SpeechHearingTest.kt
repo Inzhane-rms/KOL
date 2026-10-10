@@ -9,7 +9,9 @@ import ph.appbuilders.saklolo.contact.Ptt
 import ph.appbuilders.saklolo.stt.BeamSelect
 import ph.appbuilders.saklolo.stt.CaptionCleanup
 import ph.appbuilders.saklolo.stt.DecodeBudget
+import ph.appbuilders.saklolo.stt.DecodeMark
 import ph.appbuilders.saklolo.stt.SpeechHearing
+import ph.appbuilders.saklolo.stt.TranscriptLimit
 import ph.appbuilders.saklolo.stt.SpeechLexicon
 import ph.appbuilders.saklolo.stt.SpeechPolish
 import ph.appbuilders.saklolo.stt.SpeechScore
@@ -96,8 +98,10 @@ class SpeechHearingTest {
         assertFalse(DecodeBudget.allowBeam(1, earnedFast = true))
         assertTrue(DecodeBudget.markFast(elapsedSeconds = 0.4, clipSeconds = 1.0))
         assertFalse(DecodeBudget.markFast(elapsedSeconds = 1.2, clipSeconds = 1.0))
-        assertEquals(3_000L, DecodeBudget.deadlineMs(1.0))
-        assertEquals(15_000L, DecodeBudget.deadlineMs(10.0))
+        assertEquals(15_000L, DecodeBudget.deadlineMs(1.0))
+        assertEquals(40_000L, DecodeBudget.deadlineMs(10.0))
+        assertEquals("nandito ako", DecodeMark.text("\u001enandito ako"))
+        assertEquals(TranscriptLimit.UNAVAILABLE, DecodeMark.text("\u001e"))
         assertFalse(DecodeBudget.markSlow(elapsedSeconds = 10.0, clipSeconds = 10.0))
         assertTrue(DecodeBudget.markSlow(elapsedSeconds = 16.0, clipSeconds = 10.0))
         assertEquals(1, BeamSelect.nextBeam(WhisperPrompt.BEAM, earnedFast = false))
