@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -55,7 +57,9 @@ fun ReadyToConnectScreen(
         Modifier
             .fillMaxSize()
             .background(Page)
-            .statusBarsPadding(),
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .imePadding(),
     ) {
         Column(
             Modifier
@@ -96,10 +100,9 @@ fun ReadyToConnectScreen(
         val buttonShape = RoundedCornerShape(28.dp)
         Box(
             Modifier
-                .navigationBarsPadding()
                 .padding(horizontal = 20.dp, vertical = 12.dp)
                 .fillMaxWidth()
-                .height(56.dp)
+                .heightIn(min = 56.dp)
                 .then(
                     if (requiredReady) {
                         Modifier.clip(buttonShape).background(Violet)
@@ -124,7 +127,7 @@ fun ReadyToConnectScreen(
 @Composable
 private fun SetupLine(row: SetupRow, onFix: (SetupKey) -> Unit) {
     Row(
-        Modifier.fillMaxWidth().height(72.dp).padding(horizontal = 12.dp),
+        Modifier.fillMaxWidth().heightIn(min = 72.dp).padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         StatusMark(row)
@@ -136,11 +139,11 @@ private fun SetupLine(row: SetupRow, onFix: (SetupKey) -> Unit) {
             if (row.required) {
                 Box(
                     Modifier
-                        .height(40.dp)
-                        .clip(RoundedCornerShape(20.dp))
+                        .heightIn(min = 48.dp)
+                        .clip(RoundedCornerShape(24.dp))
                         .background(Violet)
                         .clickable { onFix(row.key) }
-                        .padding(horizontal = 16.dp),
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text("Fix", color = Color.White, fontFamily = Poppins, fontWeight = FontWeight.Bold, fontSize = 14.sp)
@@ -153,7 +156,7 @@ private fun SetupLine(row: SetupRow, onFix: (SetupKey) -> Unit) {
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp,
                     textDecoration = TextDecoration.Underline,
-                    modifier = Modifier.clickable { onFix(row.key) }.padding(horizontal = 8.dp, vertical = 8.dp),
+                    modifier = Modifier.heightIn(min = 48.dp).clickable { onFix(row.key) }.padding(horizontal = 12.dp, vertical = 14.dp),
                 )
             }
         }

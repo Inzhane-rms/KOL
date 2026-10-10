@@ -13,7 +13,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import ph.appbuilders.saklolo.ask.AskEngine
 import ph.appbuilders.saklolo.triage.SummaryChoice
 import ph.appbuilders.saklolo.triage.SummaryRefine
 
@@ -82,28 +81,6 @@ object GemmaSummarizer {
         if (engine != null) return "Gemma 3 1B is loaded. It can refine the one-line summary."
         if (policy.showLoading) return "Gemma is loading in the background."
         return "Gemma file found at ${file.parentFile?.name ?: "files"}. It loads in the background at app start."
-    }
-
-    /**
-     * Picks a stored Ask B-LINK pair id, or null for NONE / anything that is not
-     * a valid id. The model string is never returned to the screen.
-     * This does not wait for a load. The 15 second limit wraps the index call only.
-     */
-    fun chooseAskPair(context: Context, question: String, catalog: String, validIds: Set<Int>): Int? {
-        val llm = engine
-        return when (policy.plan(eligible(context), llm != null)) {
-            GemmaRefinePlan.SKIP -> null
-            GemmaRefinePlan.RULES_WITHOUT_WAITING -> {
-                preload(context)
-                null
-            }
-            GemmaRefinePlan.INFER -> {
-                val ready = llm ?: return null
-                infer(null) {
-                    AskEngine.parsePairChoice(askIndex(ready, question, catalog), validIds)
-                }
-            }
-        }
     }
 
     /**
@@ -258,29 +235,6 @@ object GemmaSummarizer {
         val session = LlmInferenceSession.createFromOptions(llm, sessionOptions)
         return try {
             session.addQueryChunk(prompt(transcript))
-            session.generateResponse()
-        } finally {
-            session.close()
-        }
-    }
-
-    private fun askIndex(llm: LlmInference, question: String, catalog: String): String {
-        val sessionOptions = LlmInferenceSession.LlmInferenceSessionOptions.builder()
-            .setTopK(1)
-            .setTemperature(0f)
-            .build()
-        val session = LlmInferenceSession.createFromOptions(llm, sessionOptions)
-        return try {
-            session.addQueryChunk(
-                """
-                Match the question to one stored safety pair.
-                Reply with one token only: the pair id, or NONE.
-                Do not write an answer.
-                Question: ${question.take(400)}
-                Pairs:
-                $catalog
-                """.trimIndent(),
-            )
             session.generateResponse()
         } finally {
             session.close()
